@@ -20,10 +20,27 @@ jobs:
   quality:
     name: Format, analyze, test, provenance
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v7
-      - uses: subosito/flutter-action@v2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+      - name: Install locked desktop KataGo bridge dependencies
+        run: |
+          python3.12 -m venv build/bridge-venv
+          build/bridge-venv/bin/python -m pip install \
+            --disable-pip-version-check \
+            --require-hashes \
+            -r tool/katago_bridge/requirements.lock
+      - name: Verify desktop KataGo bridge
+        run: |
+          build/bridge-venv/bin/python -m py_compile \
+            tool/katago_bridge/*.py tool/katago_bridge/tests/*.py
+          PYTHONPATH=tool build/bridge-venv/bin/python -m unittest discover \
+            -s tool/katago_bridge/tests -v
+      - name: Verify release evidence tooling
+        run: python3 -m unittest discover -s tool/tests -v
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
@@ -34,51 +51,179 @@ jobs:
         run: dart format --output=none --set-exit-if-changed lib test
       - name: Analyze
         run: flutter analyze --fatal-infos
+      - name: Verify privacy declarations
+        run: python3 .github/scripts/verify_privacy_declarations.py
+      - name: Verify immutable GitHub Action references
+        run: python3 .github/scripts/verify_action_pins.py
+      - name: Verify Gradle distribution and dependency hashes
+        run: python3 .github/scripts/verify_gradle_integrity.py
+      - name: Verify release workflow contracts
+        run: python3 .github/scripts/verify_release_workflows.py
+      - name: Verify native inbound contract
+        run: python3 .github/scripts/verify_native_inbound_contract.py
+      - name: Prevent production fixture imports
+        run: python3 .github/scripts/verify_no_ui_fixture_imports.py
+      - name: Enforce semantic design tokens in product UI
+        run: python3 .github/scripts/verify_design_token_usage.py
+      - name: Verify resolved licenses and ML Kit boundary
+        run: python3 tool/verify_licenses.py
+      - name: Generate locked Pub, CocoaPods, and Python SBOM
+        run: python3 tool/sbom.py generate --output build/sbom/ci-lockfiles.cdx.json
+      - name: Validate locked SBOM
+        run: >-
+          python3 tool/sbom.py validate
+          --input build/sbom/ci-lockfiles.cdx.json
+          --require-ecosystem pub
+          --require-ecosystem cocoapods
+          --require-ecosystem python
       - name: Verify visual benchmark manifest
         run: python3 .github/scripts/verify_visual_benchmarks.py
+      - name: Verify human-readable golden font boundary
+        run: python3 .github/scripts/verify_golden_font.py
       - name: Verify brand and launcher icons
         run: python3 .github/scripts/verify_brand_assets.py
       - name: Run non-golden tests
         shell: bash
         run: flutter test $(find test -type f -name '*_test.dart' ! -name 'golden_test.dart' -print | sort)
 
-  android-debug:
-    name: Android debug build
+  android-release:
+    name: Android release build and final-package guards
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-java@v5
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
         with:
           distribution: temurin
           java-version: '17'
           cache: gradle
-      - uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
       - name: Resolve locked dependencies
         run: flutter pub get
-      - name: Build debug APK
-        run: flutter build apk --debug
+      - name: Build auditable release APK and retained Flutter symbols
+        run: >-
+          flutter build apk --release
+          --split-debug-info=build/symbols/android
+      - name: Verify packaged native legal assets
+        run: >-
+          python3 .github/scripts/verify_packaged_legal_assets.py
+          --apk build/app/outputs/flutter-apk/app-release.apk
       - name: Verify merged Android permissions
-        run: .github/scripts/verify_android_permissions.sh
+        run: >-
+          .github/scripts/verify_android_permissions.sh
+          build/app/outputs/flutter-apk/app-release.apk
+      - name: Validate and archive release crash symbols
+        run: >-
+          python3 tool/release_symbols.py android
+          --mapping build/app/outputs/mapping/release/mapping.txt
+          --native-symbols build/app/outputs/native-debug-symbols/release/native-debug-symbols.zip
+          --flutter-symbols build/symbols/android
+          --output build/sbom/android-release-symbols.zip
+          --manifest build/sbom/android-release-symbols.json
+      - name: Resolve Android release runtime graph
+        run: |
+          mkdir -p build/sbom
+          ./android/gradlew -p android :app:dependencies \
+            --configuration releaseRuntimeClasspath \
+            --dependency-verification=strict \
+            --console=plain \
+            | sed -E '/^\[Incubating\] Problems report/d;/^BUILD SUCCESSFUL in /d' \
+            > build/sbom/android-release-runtime.txt
+      - name: Verify exact Maven licenses, notices, and artifact hashes
+        run: >-
+          python3 tool/native_licenses.py maven
+          --android-report build/sbom/android-release-runtime.txt
+          --manifest-output build/sbom/maven-artifacts.json
+          --check
+      - name: Generate complete release SBOM
+        run: >-
+          python3 tool/sbom.py generate
+          --output build/sbom/lizzieyzy-mobile.cdx.json
+          --android-report build/sbom/android-release-runtime.txt
+          --maven-manifest build/sbom/maven-artifacts.json
+      - name: Validate complete release SBOM
+        run: >-
+          python3 tool/sbom.py validate
+          --input build/sbom/lizzieyzy-mobile.cdx.json
+          --require-ecosystem pub
+          --require-ecosystem cocoapods
+          --require-ecosystem python
+          --require-ecosystem maven
+      - name: Generate complete Pub, CocoaPods, Maven, and Python license artifact
+        run: >-
+          python3 tool/verify_licenses.py
+          --output build/sbom/THIRD_PARTY_LICENSES.txt
+      - name: Upload compliance evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ci-compliance-${{ github.sha }}
+          path: |
+            build/sbom/android-release-runtime.txt
+            build/sbom/maven-artifacts.json
+            build/sbom/lizzieyzy-mobile.cdx.json
+            build/sbom/THIRD_PARTY_LICENSES.txt
+            build/sbom/android-release-symbols.zip
+            build/sbom/android-release-symbols.json
+            .ruby-version
+            Gemfile
+            Gemfile.lock
+            tool/katago_bridge/requirements.lock
+            tool/katago_bridge/LICENSES/websockets-BSD-3-Clause.txt
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
 
-  ios-simulator-and-golden:
-    name: macOS golden and iOS Simulator
+  ios-device-and-golden:
+    name: macOS golden and unsigned iOS device release
     runs-on: macos-15
     timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v7
-      - uses: subosito/flutter-action@v2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+      - uses: ruby/setup-ruby@d45b1a4e94b71acab930e56e79c6aa188764e7f9 # v1
+        with:
+          ruby-version: '3.3.11'
+          bundler-cache: true
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
       - name: Resolve locked dependencies
         run: flutter pub get
+      - name: Prepare pinned CocoaPods toolchain
+        run: |
+          bundle config set --local bin build/bundle-bin
+          bundle binstubs cocoapods
+          echo "$PWD/build/bundle-bin" >> "$GITHUB_PATH"
+          build/bundle-bin/pod --version
+          build/bundle-bin/pod install --project-directory=ios
       - name: Run macOS visual goldens
         run: flutter test test/golden_test.dart
-      - name: Build unsigned iOS Simulator app
-        run: flutter build ios --simulator --debug --no-codesign
+      - name: Build unsigned iOS device release
+        run: flutter build ios --release --no-codesign
+      - name: Verify packaged native legal assets
+        run: >-
+          python3 .github/scripts/verify_packaged_legal_assets.py
+          --ios-app build/ios/iphoneos/Runner.app
+      - name: Verify packaged iOS privacy aggregate
+        run: >-
+          python3 .github/scripts/verify_privacy_declarations.py
+          --app build/ios/iphoneos/Runner.app
+      - name: Require reproducible CocoaPods lockfile
+        shell: bash
+        run: |
+          pod --version
+          if ! git diff --exit-code -- ios/Podfile.lock; then
+            shasum -a 256 ios/Podfile.lock
+            exit 1
+          fi
+      - name: Verify exact CocoaPods licenses and notices
+        run: python3 tool/native_licenses.py cocoapods --check

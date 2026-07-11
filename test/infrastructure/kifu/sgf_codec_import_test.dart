@@ -94,6 +94,54 @@ void main() {
     );
   });
 
+  test('does not infer the first player from a fragment first move', () {
+    final result = codec.decode(
+      '(;FF[4]GM[1]SZ[19];W[dd];B[pp])',
+      documentId: 'white-fragment',
+    );
+
+    expect(result.document, isA<PartialGameRecord>());
+    expect(
+      result.warnings.map((warning) => warning.code),
+      contains(SgfImportWarningCode.ruleViolation),
+    );
+  });
+
+  test('validates handicap count, setup color, and first player', () {
+    final valid = codec.decode(
+      '(;FF[4]GM[1]SZ[19]HA[4]AB[dd][pd][dp][pp];W[jj];B[qq])',
+      documentId: 'valid-handicap',
+    );
+    expect(valid.document, isA<VerifiedGameRecord>());
+    expect(
+      (valid.document as VerifiedGameRecord).firstPlayer,
+      StoneColor.white,
+    );
+
+    for (final source in <String>[
+      '(;FF[4]GM[1]SZ[19]HA[4]AB[dd][pd][dp];W[jj])',
+      '(;FF[4]GM[1]SZ[19]HA[4]AB[dd][pd][dp][pp]AW[jj];W[qq])',
+      '(;FF[4]GM[1]SZ[19]HA[4]PL[B]AB[dd][pd][dp][pp];B[jj])',
+    ]) {
+      final mismatch = codec.decode(source, documentId: 'bad-handicap');
+      expect(mismatch.document, isA<PartialGameRecord>());
+      expect(
+        mismatch.warnings.map((warning) => warning.code),
+        contains(SgfImportWarningCode.handicapMismatch),
+      );
+    }
+  });
+
+  test('rejects negative handicap values', () {
+    expect(
+      () => codec.decode(
+        '(;FF[4]GM[1]SZ[19]HA[-1])',
+        documentId: 'negative-handicap',
+      ),
+      throwsA(isA<SgfFormatException>()),
+    );
+  });
+
   test('non-one move numbering remains an explicit partial record', () {
     final result = codec.decode(
       '(;FF[4]GM[1]SZ[19];B[dd]MN[87];W[pd])',
@@ -206,5 +254,43 @@ void main() {
 
     expect(result.document.metadata.playedAt, isNull);
     expect(result.tree.sequence.first['DT']!.values.single, '2026-02-31');
+  });
+
+  test('bounds main-line moves and aggregate variation replay work', () {
+    const moveLimited = SgfCodec(
+      syntaxParser: SgfSyntaxParser(limits: KifuResourceLimits(maxMoves: 2)),
+    );
+    expect(
+      () => moveLimited.decode(
+        '(;FF[4]GM[1]SZ[9];B[aa];W[bb];B[cc])',
+        documentId: 'too-many-moves',
+      ),
+      throwsA(
+        isA<KifuResourceLimitException>().having(
+          (error) => error.kind,
+          'kind',
+          KifuResourceLimitKind.moves,
+        ),
+      ),
+    );
+
+    const replayLimited = SgfCodec(
+      syntaxParser: SgfSyntaxParser(
+        limits: KifuResourceLimits(maxReplayWork: 7),
+      ),
+    );
+    expect(
+      () => replayLimited.decode(
+        '(;FF[4]GM[1]SZ[9];B[aa](;W[bb];B[cc])(;W[cc];B[bb]))',
+        documentId: 'too-many-branches',
+      ),
+      throwsA(
+        isA<KifuResourceLimitException>().having(
+          (error) => error.kind,
+          'kind',
+          KifuResourceLimitKind.replayWork,
+        ),
+      ),
+    );
   });
 }

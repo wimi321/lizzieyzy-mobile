@@ -1,14 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:lizzieyzy_mobile/application/kifu_export_scope.dart';
 import 'package:lizzieyzy_mobile/design_system/design_system.dart';
+import 'package:lizzieyzy_mobile/domain/domain.dart' show AnalysisProfile;
+import 'package:lizzieyzy_mobile/l10n/l10n.dart';
 
 import '../../../app/app_routes.dart';
 import '../../common/presentation/feature_chrome.dart';
-import '../../fixtures/ui_fixtures.dart';
+import '../../common/presentation/share_anchor.dart';
+import 'review_screen_data.dart';
 import 'review_widgets.dart';
 
 class TabletReviewScreen extends StatefulWidget {
-  const TabletReviewScreen({super.key});
+  const TabletReviewScreen({super.key, this.data, this.initialMove});
+
+  final ReviewScreenData? data;
+  final int? initialMove;
 
   @override
   State<TabletReviewScreen> createState() => _TabletReviewScreenState();
@@ -16,226 +23,250 @@ class TabletReviewScreen extends StatefulWidget {
 
 class _TabletReviewScreenState extends State<TabletReviewScreen> {
   ReviewSection _section = ReviewSection.keyMoves;
-  var _currentMove = 87;
+  int? _currentMove;
+  bool _sharing = false;
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final data = widget.data;
+    if (data == null) return const _TabletReviewUnavailable();
+    final move =
+        (_currentMove ??
+                widget.initialMove ??
+                data.primaryMoment?.moveNumber ??
+                1)
+            .clamp(1, data.totalMoves);
+    final before = data.beforeMove(move);
+    final bestPoint = before.candidates.firstOrNull?.move.point;
+    final inheritedFamily = Theme.of(context).textTheme.bodyMedium?.fontFamily;
+    final darkTheme = LizzieTheme.dark();
+    final resolvedDarkTheme = inheritedFamily == null
+        ? darkTheme
+        : darkTheme.copyWith(
+            textTheme: darkTheme.textTheme.apply(fontFamily: inheritedFamily),
+            primaryTextTheme: darkTheme.primaryTextTheme.apply(
+              fontFamily: inheritedFamily,
+            ),
+          );
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light,
       child: Theme(
-        data: LizzieTheme.dark(),
+        data: resolvedDarkTheme,
         child: Builder(
-          builder: (context) {
-            return Scaffold(
-              body: Column(
-                children: <Widget>[
-                  FeatureTopBar(
-                    title: '山海一局  vs  清风入弦',
-                    subtitle: '中国规则 · 白胜3.5目 · 236手',
-                    leading: const BackCircleButton(),
-                    actions: <Widget>[
-                      const MetricPill(
-                        label: '标准复盘',
-                        tone: MetricTone.primary,
-                        compact: true,
+          builder: (context) => Scaffold(
+            body: Column(
+              children: <Widget>[
+                FeatureTopBar(
+                  title: data.localizedTitle(l10n),
+                  subtitle: data.localizedSubtitle(l10n),
+                  leading: const BackCircleButton(),
+                  actions: <Widget>[
+                    MetricPill(
+                      label: _profileLabel(data, l10n),
+                      tone: MetricTone.primary,
+                      compact: true,
+                    ),
+                    Builder(
+                      builder: (buttonContext) => IconButton(
+                        tooltip: l10n.shareKifu,
+                        onPressed: _sharing
+                            ? null
+                            : () => _share(buttonContext, data),
+                        icon: _sharing
+                            ? const SizedBox.square(
+                                dimension: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.ios_share_outlined),
                       ),
-                      IconButton(
-                        tooltip: '导出复盘',
-                        onPressed: () {},
-                        icon: const Icon(Icons.ios_share_outlined),
-                      ),
-                    ],
-                    dark: true,
-                  ),
-                  Expanded(
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        if (constraints.maxWidth < 760) {
-                          return const Center(child: Text('请横置平板以使用双栏复盘'));
-                        }
-                        return Row(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                    ),
+                  ],
+                  dark: true,
+                ),
+                Expanded(
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      if (constraints.maxWidth < 760) {
+                        return Center(child: Text(l10n.tabletLandscapeHint));
+                      }
+                      return Padding(
+                        padding: const EdgeInsets.fromLTRB(
+                          GoSpacing.s4,
+                          GoSpacing.s2,
+                          GoSpacing.s4,
+                          GoSpacing.s3,
+                        ),
+                        child: Row(
                           children: <Widget>[
                             Expanded(
-                              flex: 5,
-                              child: Padding(
-                                padding: const EdgeInsets.fromLTRB(
-                                  GoSpacing.s4,
-                                  GoSpacing.s2,
-                                  GoSpacing.s3,
-                                  GoSpacing.s4,
-                                ),
-                                child: Column(
-                                  children: <Widget>[
-                                    Expanded(
-                                      child: Center(
+                              flex: 6,
+                              child: Column(
+                                children: <Widget>[
+                                  Expanded(
+                                    child: Center(
+                                      child: AspectRatio(
+                                        aspectRatio: 1,
                                         child: GoBoard(
-                                          stones: UiFixtures.stones,
-                                          candidates: UiFixtures.candidates,
-                                          lastMove: const BoardPoint(15, 3),
-                                          selectedPoint: const BoardPoint(
-                                            16,
-                                            5,
+                                          boardSize:
+                                              data.record.boardSize.dimension,
+                                          stones: data.stonesBeforeMove(move),
+                                          candidates: data.candidatesBeforeMove(
+                                            move,
+                                            l10n,
                                           ),
+                                          lastMove: _previousPoint(data, move),
+                                          selectedPoint: bestPoint == null
+                                              ? null
+                                              : uiPoint(bestPoint),
                                           showCoordinates: true,
-                                          semanticLabel:
-                                              '平板复盘棋盘，第$_currentMove手，显示三个候选点',
+                                          semanticLabel: l10n
+                                              .tabletBoardSemantics(
+                                                move,
+                                                before.candidates.length,
+                                              ),
                                         ),
                                       ),
                                     ),
-                                    const SizedBox(height: GoSpacing.s2),
-                                    Wrap(
-                                      spacing: GoSpacing.s2,
-                                      runSpacing: GoSpacing.s2,
-                                      alignment: WrapAlignment.center,
-                                      children: <Widget>[
-                                        const MetricPill(
-                                          label: '白方领先',
-                                          value: '3.1目',
-                                          tone: MetricTone.gold,
-                                          compact: true,
-                                        ),
-                                        const MetricPill(
-                                          label: '白胜率',
-                                          value: '57.8%',
-                                          compact: true,
-                                        ),
-                                        MetricPill(
-                                          label: '当前',
-                                          value: '第$_currentMove手',
-                                          compact: true,
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: GoSpacing.s1),
-                                    MoveTimeline(
-                                      currentMove: _currentMove,
-                                      totalMoves: 236,
-                                      keyMoves:
-                                          UiFixtures.keyMove.timelineKeyMoves,
-                                      onChanged: (move) =>
-                                          setState(() => _currentMove = move),
-                                    ),
-                                  ],
-                                ),
+                                  ),
+                                  const SizedBox(height: GoSpacing.s2),
+                                  _TabletMetricRow(data: data, move: move),
+                                  const SizedBox(height: GoSpacing.s1),
+                                  MoveTimeline(
+                                    currentMove: move,
+                                    minimumMove: 1,
+                                    totalMoves: data.totalMoves,
+                                    keyMoves: data.keyMoveNumbers,
+                                    onChanged: (value) =>
+                                        setState(() => _currentMove = value),
+                                  ),
+                                ],
                               ),
                             ),
-                            VerticalDivider(
-                              width: 1,
-                              color: context.goColors.softDivider,
-                            ),
+                            const SizedBox(width: GoSpacing.s4),
                             Expanded(
                               flex: 4,
-                              child: ColoredBox(
-                                color: Theme.of(context).colorScheme.surface,
-                                child: ListView(
-                                  key: const Key('tablet-review-inspector'),
-                                  padding: const EdgeInsets.all(GoSpacing.s4),
-                                  children: <Widget>[
-                                    Row(
-                                      children: <Widget>[
-                                        Expanded(
-                                          child: Text(
-                                            '第87手',
-                                            style: Theme.of(
-                                              context,
-                                            ).textTheme.headlineSmall,
-                                          ),
-                                        ),
-                                        const MetricPill(
-                                          label: '-5.2目',
-                                          tone: MetricTone.negative,
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: GoSpacing.s3),
-                                    ReviewSheet(
-                                      selectedSection: _section,
-                                      onSectionChanged: (section) =>
-                                          setState(() => _section = section),
-                                      showHandle: false,
-                                      contentPadding: const EdgeInsets.fromLTRB(
-                                        0,
-                                        GoSpacing.s4,
-                                        0,
-                                        0,
-                                      ),
-                                      child: AnimatedSwitcher(
-                                        duration: GoMotion.resolve(
-                                          context,
-                                          GoMotion.standard,
-                                        ),
-                                        child: _buildInspector(context),
-                                      ),
-                                    ),
-                                  ],
+                              child: ReviewInspector(
+                                key: const Key('tablet-review-inspector'),
+                                data: data,
+                                currentMove: move,
+                                section: _section,
+                                onSectionChanged: (value) =>
+                                    setState(() => _section = value),
+                                onOpenVariation: () => Navigator.pushNamed(
+                                  context,
+                                  AppRoutes.variationComparison,
+                                  arguments: ReviewMoveSelection(
+                                    data: data,
+                                    moveNumber: move,
+                                  ),
+                                ),
+                                onOpenPerformance: () => Navigator.pushNamed(
+                                  context,
+                                  AppRoutes.gamePerformance,
+                                  arguments: data,
                                 ),
                               ),
                             ),
                           ],
-                        );
-                      },
-                    ),
+                        ),
+                      );
+                    },
                   ),
-                ],
-              ),
-            );
-          },
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildInspector(BuildContext context) => switch (_section) {
-    ReviewSection.keyMoves => KeyedSubtree(
-      key: const ValueKey(ReviewSection.keyMoves),
-      child: KeyMoveSummary(
-        onOpenVariation: () =>
-            Navigator.pushNamed(context, AppRoutes.variationComparison),
-      ),
-    ),
-    ReviewSection.variations => KeyedSubtree(
-      key: const ValueKey(ReviewSection.variations),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          CandidateComparison(
-            onTap: () =>
-                Navigator.pushNamed(context, AppRoutes.variationComparison),
-          ),
-          const SizedBox(height: GoSpacing.s3),
-          OutlinedButton.icon(
-            onPressed: () =>
-                Navigator.pushNamed(context, AppRoutes.variationComparison),
-            icon: const Icon(Icons.account_tree_outlined),
-            label: const Text('打开变化比较'),
-          ),
-        ],
-      ),
-    ),
-    ReviewSection.trend => const KeyedSubtree(
-      key: ValueKey(ReviewSection.trend),
-      child: ReviewTrendPanel(),
-    ),
-    ReviewSection.game => KeyedSubtree(
-      key: const ValueKey(ReviewSection.game),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          const PerformanceBand(
-            lowerRank: '3级',
-            upperRank: '1级',
-            confidenceLabel: '中等置信度',
-            effectiveDecisions: 86,
-          ),
-          const SizedBox(height: GoSpacing.s3),
-          FilledButton(
-            onPressed: () =>
-                Navigator.pushNamed(context, AppRoutes.gamePerformance),
-            child: const Text('查看本局指标'),
-          ),
-        ],
-      ),
-    ),
-  };
+  Future<void> _share(BuildContext buttonContext, ReviewScreenData data) async {
+    final service = KifuExportScope.maybeOf(context);
+    if (service == null) return;
+    setState(() => _sharing = true);
+    try {
+      await service.share(
+        data.record,
+        anchor: resolveShareAnchor(buttonContext),
+      );
+    } on Object {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(context.l10n.shareUnavailable)));
+      }
+    } finally {
+      if (mounted) setState(() => _sharing = false);
+    }
+  }
 }
+
+class _TabletMetricRow extends StatelessWidget {
+  const _TabletMetricRow({required this.data, required this.move});
+
+  final ReviewScreenData data;
+  final int move;
+
+  @override
+  Widget build(BuildContext context) {
+    final before = data.beforeMove(move);
+    final after = data.afterMove(move);
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: <Widget>[
+        MetricPill(
+          label: context.l10n.moveOrdinal(move),
+          tone: MetricTone.primary,
+        ),
+        const SizedBox(width: GoSpacing.s2),
+        MetricPill(
+          label: context.l10n.blackScoreLeadLabel,
+          value: formatScore(before.scoreLead, context.l10n),
+        ),
+        const SizedBox(width: GoSpacing.s2),
+        MetricPill(
+          label: context.l10n.pointLossLabel,
+          value: formatPointLoss(after.playedMovePointLoss, context.l10n),
+          tone: (after.playedMovePointLoss ?? 0) >= 3
+              ? MetricTone.negative
+              : MetricTone.gold,
+        ),
+      ],
+    );
+  }
+}
+
+class _TabletReviewUnavailable extends StatelessWidget {
+  const _TabletReviewUnavailable();
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    body: Center(
+      child: FilledButton(
+        onPressed: () => Navigator.pushNamedAndRemoveUntil(
+          context,
+          AppRoutes.root,
+          (_) => false,
+        ),
+        child: Text(context.l10n.noReviewDataReturn),
+      ),
+    ),
+  );
+}
+
+BoardPoint? _previousPoint(ReviewScreenData data, int move) {
+  if (move <= 1) return null;
+  final point = data.record.moves[move - 2].point;
+  return point == null ? null : uiPoint(point);
+}
+
+String _profileLabel(ReviewScreenData data, AppLocalizations l10n) =>
+    switch (data.analysis.settings.profile) {
+      AnalysisProfile.quick => l10n.quickReview,
+      AnalysisProfile.standard => l10n.standardReview,
+      AnalysisProfile.deep => l10n.deepReview,
+    };

@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:image/image.dart' as image_lib;
 import 'package:image_picker/image_picker.dart';
 import 'package:lizzieyzy_mobile/domain/domain.dart';
+import 'package:lizzieyzy_mobile/infrastructure/io/io.dart';
 
 enum ScanPlatformFailureKind {
   permissionDenied,
@@ -50,10 +51,14 @@ abstract interface class ScanCapturePlatform {
 
 /// Camera/image-picker implementation used on iOS and Android.
 final class PluginScanCapturePlatform implements ScanCapturePlatform {
-  PluginScanCapturePlatform({ImagePicker? imagePicker})
-    : _imagePicker = imagePicker ?? ImagePicker();
+  PluginScanCapturePlatform({
+    ImagePicker? imagePicker,
+    CapturedFrameFileReader frameReader = const CapturedFrameFileReader(),
+  }) : _imagePicker = imagePicker ?? ImagePicker(),
+       _frameReader = frameReader;
 
   final ImagePicker _imagePicker;
+  final CapturedFrameFileReader _frameReader;
   CameraController? _controller;
   ScanFlashMode _flashMode = ScanFlashMode.automatic;
   int _lifecycleGeneration = 0;
@@ -185,7 +190,7 @@ final class PluginScanCapturePlatform implements ScanCapturePlatform {
       try {
         final file = await controller.takePicture();
         try {
-          frames.add(await _frameFromFile(file));
+          frames.add(await _frameReader.read(file));
         } finally {
           await _deleteTemporaryCapture(file.path);
         }
@@ -225,7 +230,7 @@ final class PluginScanCapturePlatform implements ScanCapturePlatform {
         requestFullMetadata: false,
       );
       if (file == null) return null;
-      return _frameFromFile(file);
+      return _frameReader.read(file);
     } on PlatformException catch (error) {
       final denied = error.code.toLowerCase().contains('denied');
       throw ScanPlatformException(
@@ -304,9 +309,20 @@ final class PluginScanCapturePlatform implements ScanCapturePlatform {
       !_disposed && generation == _lifecycleGeneration;
 }
 
-Future<CapturedFrame> _frameFromFile(XFile file) async {
-  final bytes = await file.readAsBytes();
-  return _frameFromBytes(bytes);
+/// Converts a camera or photo-picker file into a frame through the same
+/// per-frame byte budget used by the vision pipeline.
+final class CapturedFrameFileReader {
+  const CapturedFrameFileReader({this.maximumBytes = defaultMaximumBytes})
+    : assert(maximumBytes > 0);
+
+  static const defaultMaximumBytes = 32 * 1024 * 1024;
+
+  final int maximumBytes;
+
+  Future<CapturedFrame> read(XFile file) async {
+    final bytes = await readBoundedXFile(file, maximumBytes: maximumBytes);
+    return _frameFromBytes(bytes);
+  }
 }
 
 CapturedFrame _frameFromBytes(Uint8List bytes) {

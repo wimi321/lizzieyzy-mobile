@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "assembly": "finalPrompt = sharedPrompt + \"\\n\\n\" + screenPrompt",
+  "generator": {
+    "mode": "built-in-imagegen",
+    "model": "OpenAI built-in image generation model",
+    "modelBuildVisibility": "The built-in tool did not expose a public model build identifier. This limitation is recorded instead of inventing one.",
+    "useCase": "ui-mockup"
+  },
+  "sharedPrompt": "Generate one realistic, production-ready full-screen Flutter product UI screenshot with no device frame and no marketing background. Logical phone canvas is 390 x 844 unless the screen prompt explicitly requests the 1024 x 768 tablet canvas. Product: LizzieYZY Mobile, an open-source iOS and Android Go/Weiqi review app. Visual direction: modern Eastern minimalism; porcelain #F7F4ED background, paper #FFFEFA surfaces, ink #18201C text, secondary #68716C, jade #237B64 primary accent, restrained gold #A97B32 data accent, cinnabar #C9503B error, dark review #111713 and #19221D with #E9EEE9 text, Go board #D8B77D and grid #59462F. Use system Chinese sans typography and tabular figures, a 4-point spacing rhythm, 12-point card radii, 20-point analysis sheets, low-contrast borders, and only an extremely subtle single elevation level. Keep the complete primary task inside one viewport with no vertical scrolling. Body text must be at least 14 pt, touch targets at least 44 pt, state must never be conveyed by color alone, and hierarchy must remain accessible. Render the specified Simplified Chinese wording exactly where possible. All boards, charts, controls, and cards must look realistically implementable with Flutter Canvas, widgets, or SVG. Avoid glassmorphism, neon gradients, heavy shadows, decorative floating stones, nested cards, faux-antique chrome, a shrunken desktop layout, dual Y axes, unlabeled icons, watermarks, and rasterized marketing art.",
+  "prompts": [
+    {
+      "id": "north-star-01",
+      "screenPrompt": "Create the light-theme key-move review north-star. Make a precise 19 x 19 board the dominant element. Show move 87 and candidate markers A, B, C. The key comparison must read: 第87手, 实战 Q16, 最佳 R14, -5.2目, -18.4pp. Provide four explicit review modes: 关键手, 变化, 走势, 本局. The result must feel calm, premium, information-dense, and immediately scannable rather than decorative."
+    },
+    {
+      "id": "north-star-02",
+      "screenPrompt": "Create an alternative light key-move review direction using restrained rice-paper warmth and editorial spacing. Preserve the same move-87 board, candidates, exact numeric comparison, four review modes, accessibility, and single-viewport constraints. Keep texture extremely subtle and implementation-safe."
+    },
+    {
+      "id": "north-star-03",
+      "screenPrompt": "Create an alternative graphite-dark key-move review direction. Preserve the same move-87 board, candidates, exact numeric comparison, four review modes, accessibility, and single-viewport constraints. Use dark review surfaces and crisp numeric contrast without neon or gaming aesthetics."
+    },
+    {
+      "id": "screen-01",
+      "screenPrompt": "Create the 棋谱 home screen. Show a compact current-position/analysis-status area, two recent game records, and one dominant 拍照识谱 action. Include realistic SGF, 野狐, and OGS source labels without implying that an account is required. Keep settings in the top-right and keep the whole primary task within the phone viewport."
+    },
+    {
+      "id": "screen-02",
+      "screenPrompt": "Create the dark camera capture screen for a physical Go board. Show a live-board-like preview, a complete four-corner alignment guide, level feedback, the exact status 棋盘已对齐·保持稳定, a large shutter, a clearly labeled album entry, flash control, and help. No content may require scrolling."
+    },
+    {
+      "id": "screen-03",
+      "screenPrompt": "Create the physical-board correction screen. Show the original crop and a rectified 19 x 19 board, six visibly numbered uncertain intersections, the exact state 待确认 2, and explicit 黑, 白, 空, 看不清 correction choices. Completion stays disabled while uncertainty remains. Keep image, board, correction tray, and primary state in one viewport."
+    },
+    {
+      "id": "screen-04",
+      "screenPrompt": "Create the numbered kifu-diagram correction screen. Show a printed numbered Go diagram with the exact warning 第87手无法确认, numeric candidates, a repeated-point or capture conflict, a pass repair option, and a save-as-partial fallback. Make the trust boundary unmistakable without explanatory prose or scrolling."
+    },
+    {
+      "id": "screen-05",
+      "screenPrompt": "Create the recognition result for a static board position. Render the exact message 已识别当前局面：黑84子，白82子。单张照片不包含落子时间，无法恢复完整手顺。 Show the next-player confirmation, Chinese rules, 7.5 komi, and actions to save or analyze the position. Do not show a move timeline, key moves, or a strength estimate."
+    },
+    {
+      "id": "screen-06",
+      "screenPrompt": "Create the standard analysis progress screen. Show a board, the exact progress 142/236, standard profile, 1,000 visits per turn, numeric model/service status, pause, cancel, and 后台继续. The board and all three control states must remain visible in one phone viewport."
+    },
+    {
+      "id": "screen-08-edit-01",
+      "screenPrompt": "Create the single-game performance screen with no decorative ink-wash artwork. Render the exact headline 本局发挥 3级–1级, plus 80%区间, 中等置信度, and 86个有效决策. Include compact opening, middle-game, and endgame numeric metrics plus a clear disclaimer that this is not a permanent or official rank. Everything must fit in one viewport."
+    },
+    {
+      "id": "screen-09",
+      "screenPrompt": "Create the graphite-dark variation comparison screen. Compare 实战 Q16 with 候选 R14, render a numbered principal variation 1 through 8 on the board, and show the exact metrics R14, 57.8%, +3.1目, 12,840访问. Provide an explicit 回到主线 action. Keep candidate switching, board, core metrics, and return action within one viewport."
+    },
+    {
+      "id": "screen-10",
+      "screenPrompt": "Create a 1024 x 768 landscape tablet graphite-dark review screen. Use three adaptive panes: kifu/navigation on the left, a large 19 x 19 board in the center, and a numeric analysis inspector on the right, with a full-width move timeline at the bottom. This must be a native tablet composition, not a scaled desktop UI."
+    }
+  ]
+}

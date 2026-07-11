@@ -1,0 +1,4 @@
+# Universal pure-Python wheel published by python-websockets for release 16.0.
+# The direct artifact URL avoids silently selecting an unlisted native wheel.
+websockets @ https://files.pythonhosted.org/packages/6f/28/258ebab549c2bf3e64d2b0217b973467394a9cea8c42f70418ca2c5d0d2e/websockets-16.0-py3-none-any.whl \
+    --hash=sha256:1637db62fad1dc833276dded54215f2c7fa46912301a24bd94d45d46a011ceec

@@ -60,7 +60,13 @@ final class DefaultReviewBuilder implements ReviewBuilder {
         index++
       )
         if (ranked[index].pointLoss > 0)
-          KeyMoment(analysis: ranked[index].after, severityRank: index + 1),
+          KeyMoment(
+            playedMove: ranked[index].playedMove,
+            before: ranked[index].before,
+            after: ranked[index].after,
+            candidateRank: ranked[index].candidateRank,
+            severityRank: index + 1,
+          ),
     ];
 
     return ReviewReport(

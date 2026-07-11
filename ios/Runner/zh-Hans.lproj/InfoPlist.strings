@@ -1,0 +1,3 @@
+"NSCameraUsageDescription" = "用于拍摄围棋棋盘，并在设备上识别当前局面或编号棋谱图。";
+"NSPhotoLibraryUsageDescription" = "用于选择围棋棋盘照片或编号棋谱图，并在设备上进行识别。";
+"NSLocalNetworkUsageDescription" = "用于连接您配置的局域网 KataGo 分析服务。";

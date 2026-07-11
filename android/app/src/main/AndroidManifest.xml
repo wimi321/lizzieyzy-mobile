@@ -16,9 +16,16 @@
 
     <uses-feature
         android:name="android.hardware.camera.any"
+        android:required="false"
+        tools:replace="android:required" />
+    <!-- CAMERA permission otherwise implies a required rear camera in Google
+         Play filtering, even though gallery import remains fully usable. -->
+    <uses-feature
+        android:name="android.hardware.camera"
         android:required="false" />
 
     <application
+        android:allowBackup="false"
         android:label="LizzieYZY"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
@@ -43,6 +50,22 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/x-go-sgf" />
+                <data android:mimeType="application/sgf" />
+                <data android:mimeType="application/x-go-gib" />
+                <data android:mimeType="application/gib" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/x-go-sgf" />
+                <data android:mimeType="application/sgf" />
+                <data android:mimeType="application/x-go-gib" />
+                <data android:mimeType="application/gib" />
             </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.

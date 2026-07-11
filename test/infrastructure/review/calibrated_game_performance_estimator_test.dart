@@ -150,6 +150,7 @@ void main() {
         engineVersion: fixture.model.engineVersion,
         modelVersion: fixture.model.modelVersion,
         license: fixture.model.license,
+        humanModelSha256: fixture.model.humanModelSha256,
         humanStyleRanks: <GoRank>[GoRank.kyu(20)],
       );
 
@@ -194,6 +195,22 @@ void main() {
       );
 
       expect(report.effectiveDecisions, 40);
+    });
+
+    test('requires the exact independent HumanSL model hash', () {
+      final model = analysisModelFixture(humanHashCharacter: 'e');
+      final fixture = reviewFixture(moveCount: 40, model: model);
+
+      expect(
+        () => _estimator().estimate(
+          fixture.record,
+          fixture.analysis,
+          fixture.model,
+        ),
+        _throwsPerformance(
+          PerformanceEstimationErrorCode.uncalibratedHumanModel,
+        ),
+      );
     });
 
     test('requires HumanSL rank metadata when calibration declares it', () {
@@ -311,10 +328,31 @@ void main() {
       );
     });
 
-    test('uses the declared policy floor when the played move is unlisted', () {
+    test('uses full policy evidence when the played move is unlisted', () {
       final fixture = reviewFixture(
         moveCount: 40,
         candidateRankForMove: (_) => 6,
+        playedMovePolicyForMove: (_) => 0.007,
+      );
+
+      final report = _estimator().estimate(
+        fixture.record,
+        fixture.analysis,
+        fixture.model,
+      );
+
+      expect(
+        report.metrics.humanStyleLogLikelihood,
+        closeTo(math.log(0.007), 1e-12),
+      );
+      expect(report.metrics.topFiveRate, 0);
+    });
+
+    test('applies the declared floor only to near-zero full policy', () {
+      final fixture = reviewFixture(
+        moveCount: 40,
+        candidateRankForMove: (_) => 6,
+        playedMovePolicyForMove: (_) => 0,
       );
 
       final report = _estimator().estimate(
@@ -327,7 +365,6 @@ void main() {
         report.metrics.humanStyleLogLikelihood,
         closeTo(math.log(1e-6), 1e-12),
       );
-      expect(report.metrics.topFiveRate, 0);
     });
 
     test('is deterministic for the same record, analysis, and manifests', () {
@@ -425,6 +462,7 @@ List<Object> _performanceSnapshot(GamePerformanceReport report) => <Object>[
 GamePerformanceCalibration _copyCalibration(
   GamePerformanceCalibration source, {
   Set<String>? allowedHashes,
+  Set<String>? allowedHumanHashes,
   Set<AnalysisProfile>? allowedProfiles,
   List<CalibrationBucket>? buckets,
   double? coverage,
@@ -437,12 +475,15 @@ GamePerformanceCalibration _copyCalibration(
     buckets: buckets ?? source.buckets,
     allowedAnalysisModelSha256:
         allowedHashes ?? source.allowedAnalysisModelSha256,
+    allowedHumanModelSha256:
+        allowedHumanHashes ?? source.allowedHumanModelSha256,
     allowedProfiles: allowedProfiles ?? source.allowedProfiles,
     minimumVisitsPerPosition: source.minimumVisitsPerPosition,
     mediumConfidenceDecisions: source.mediumConfidenceDecisions,
     severeMistakePointLoss: source.severeMistakePointLoss,
     policyFloor: source.policyFloor,
     requiresHumanStyleRanks: source.requiresHumanStyleRanks,
+    humanStyleProfile: source.humanStyleProfile,
     coverage: coverage ?? source.coverage,
   );
 }

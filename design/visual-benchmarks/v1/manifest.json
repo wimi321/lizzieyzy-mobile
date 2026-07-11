@@ -5,7 +5,20 @@
   "generatedAt": "2026-07-10T00:00:00+08:00",
   "generator": {
     "mode": "built-in-imagegen",
-    "useCase": "ui-mockup"
+    "model": "OpenAI built-in image generation model",
+    "modelBuildVisibility": "opaque-to-client",
+    "useCase": "ui-mockup",
+    "promptCatalog": "prompts/final-prompts.json",
+    "promptCatalogSha256": "42a58d7e1f05cc7ae32676285a8d4e592e3355c3f7f01d4e976a98c1a03045cd"
+  },
+  "figmaMirror": {
+    "fileKey": "I2WtCpezUouSAM1WyJgTyb",
+    "url": "https://www.figma.com/design/I2WtCpezUouSAM1WyJgTyb",
+    "status": "blocked-by-plan-mode-limit",
+    "requiredThemeModes": 4,
+    "availableThemeModes": 1,
+    "canonicalSource": "repository",
+    "note": "The connected Figma Starter/View plan rejected the required multi-mode semantic variable collection atomically. No partial or fake theme library was published."
   },
   "visualDirection": "modern-eastern-minimal",
   "logicalPhoneSize": {"width": 390, "height": 844},
@@ -21,18 +34,21 @@
     "candidates": [
       {
         "file": "north-star/01-porcelain-jade-selected.png",
+        "promptId": "north-star-01",
         "score": 94,
         "selected": true,
         "sha256": "5ae1134c91a1bdf50ca57cf3d16c598e9ecaad5b83eadefa16043df02aa5fe4a"
       },
       {
         "file": "north-star/02-rice-paper-minimal.png",
+        "promptId": "north-star-02",
         "score": 89,
         "selected": false,
         "sha256": "0a61c2e72fb3802090cef97af94a94662d766676d3bd1dd63903f62e93c971d6"
       },
       {
         "file": "north-star/03-graphite-dark.png",
+        "promptId": "north-star-03",
         "score": 87,
         "selected": false,
         "sha256": "711c3d201d6b7a14714e500df2a4e679adec01a1bcd1fd563f2b10c4d79c1471"

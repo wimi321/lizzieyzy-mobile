@@ -4,8 +4,10 @@ import 'package:lizzieyzy_mobile/features/home/presentation/kifu_home_screen.dar
 import 'package:lizzieyzy_mobile/features/review/presentation/key_move_review_screen.dart';
 import 'package:lizzieyzy_mobile/features/review/presentation/tablet_review_screen.dart';
 import 'package:lizzieyzy_mobile/features/review/presentation/variation_comparison_screen.dart';
+import 'package:lizzieyzy_mobile/features/review/presentation/review_screen_data.dart';
 
 import 'support/golden_test_harness.dart';
+import 'support/review_screen_fixture.dart';
 
 void main() {
   group('Visual Benchmark v1', () {
@@ -26,7 +28,7 @@ void main() {
       await pumpGoldenSurface(
         tester,
         size: GoldenViewport.phone,
-        screen: const KeyMoveReviewScreen(),
+        screen: KeyMoveReviewScreen(data: reviewScreenFixture()),
       );
 
       await expectLater(
@@ -40,7 +42,12 @@ void main() {
         tester,
         size: GoldenViewport.phone,
         themeMode: ThemeMode.dark,
-        screen: const VariationComparisonScreen(),
+        screen: VariationComparisonScreen(
+          selection: ReviewMoveSelection(
+            data: reviewScreenFixture(),
+            moveNumber: reviewScreenFixture().primaryMoment!.moveNumber,
+          ),
+        ),
       );
 
       await expectLater(
@@ -54,7 +61,7 @@ void main() {
         tester,
         size: GoldenViewport.tabletLandscape,
         themeMode: ThemeMode.dark,
-        screen: const TabletReviewScreen(),
+        screen: TabletReviewScreen(data: reviewScreenFixture()),
       );
 
       await expectLater(

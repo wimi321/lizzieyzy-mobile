@@ -4,10 +4,18 @@ import 'dart:math' as math;
 import 'package:image/image.dart' as img;
 import 'package:lizzieyzy_mobile/domain/domain.dart';
 
+import 'vision_limits.dart';
+
 enum BoardVisionErrorCode {
   undecodableFrame,
   frameTooSmall,
   unsupportedGeometry,
+  resourceLimitExceeded,
+  invalidFrameMetadata,
+  boardNotFound,
+  ambiguousBoard,
+  inconsistentBoardSize,
+  insufficientDetectedFrames,
 }
 
 final class BoardVisionException implements Exception {
@@ -37,25 +45,61 @@ final class GuideAlignedBoardVision implements BoardVision {
     this.cropFraction = 0.9,
     this.gridInsetFraction = 0.055,
     this.minimumFrameSide = 320,
-  }) : assert(cropFraction > 0.5 && cropFraction <= 1),
-       assert(gridInsetFraction >= 0 && gridInsetFraction < 0.2),
-       assert(minimumFrameSide >= 128);
+    this.resourceLimits = const VisionResourceLimits(),
+  });
 
   final BoardSize boardSize;
   final double cropFraction;
   final double gridInsetFraction;
   final int minimumFrameSide;
+  final VisionResourceLimits resourceLimits;
 
   @override
-  Future<ScanDraft> recognize(FrameBundle frames) => Isolate.run(
-    () => _recognizeSync(
-      frames,
-      boardSize: boardSize,
-      cropFraction: cropFraction,
-      gridInsetFraction: gridInsetFraction,
-      minimumFrameSide: minimumFrameSide,
-    ),
-  );
+  Future<ScanDraft> recognize(FrameBundle frames) {
+    _validateConfiguration();
+    try {
+      resourceLimits.validateBundle(frames);
+    } on VisionResourceException catch (error) {
+      throw _boardVisionExceptionFor(error);
+    }
+    return Isolate.run(
+      () => _recognizeSync(
+        frames,
+        boardSize: boardSize,
+        cropFraction: cropFraction,
+        gridInsetFraction: gridInsetFraction,
+        minimumFrameSide: minimumFrameSide,
+        resourceLimits: resourceLimits,
+      ),
+    );
+  }
+
+  void _validateConfiguration() {
+    if (!cropFraction.isFinite || cropFraction <= 0.5 || cropFraction > 1) {
+      throw RangeError.value(
+        cropFraction,
+        'cropFraction',
+        'Must be finite and greater than 0.5 through 1.',
+      );
+    }
+    if (!gridInsetFraction.isFinite ||
+        gridInsetFraction < 0 ||
+        gridInsetFraction >= 0.2) {
+      throw RangeError.value(
+        gridInsetFraction,
+        'gridInsetFraction',
+        'Must be finite and at least 0 but less than 0.2.',
+      );
+    }
+    if (minimumFrameSide < 128) {
+      throw RangeError.value(
+        minimumFrameSide,
+        'minimumFrameSide',
+        'Must be at least 128 pixels.',
+      );
+    }
+    resourceLimits.validateConfiguration();
+  }
 }
 
 ScanDraft _recognizeSync(
@@ -64,6 +108,7 @@ ScanDraft _recognizeSync(
   required double cropFraction,
   required double gridInsetFraction,
   required int minimumFrameSide,
+  required VisionResourceLimits resourceLimits,
 }) {
   final probabilitySums = <BoardPoint, _ClassWeights>{};
   _Crop? firstCrop;
@@ -83,6 +128,15 @@ ScanDraft _recognizeSync(
         BoardVisionErrorCode.undecodableFrame,
         'The captured frame is not a supported image.',
       );
+    }
+    try {
+      resourceLimits.validateDecodedFrame(
+        frame,
+        decodedWidth: source.width,
+        decodedHeight: source.height,
+      );
+    } on VisionResourceException catch (error) {
+      throw _boardVisionExceptionFor(error);
     }
     var oriented = img.bakeOrientation(source);
     oriented = switch (frame.rotation) {
@@ -147,6 +201,13 @@ ScanDraft _recognizeSync(
     intersections: predictions,
     boardConfidence: (qualitySum / divisor).clamp(0, 1),
   );
+}
+
+BoardVisionException _boardVisionExceptionFor(VisionResourceException error) {
+  final code = error.violation == VisionResourceViolation.frameMetadataMismatch
+      ? BoardVisionErrorCode.invalidFrameMetadata
+      : BoardVisionErrorCode.resourceLimitExceeded;
+  return BoardVisionException(code, error.message);
 }
 
 _Crop _cropFor(img.Image image, double cropFraction) {

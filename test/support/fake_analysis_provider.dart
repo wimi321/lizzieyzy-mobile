@@ -1,5 +1,4 @@
-import '../analysis.dart';
-import '../contracts.dart';
+import 'package:lizzieyzy_mobile/domain/domain.dart';
 
 typedef AnalysisFixtureFactory =
     AnalysisBundle Function(AnalysisRequest request);
@@ -8,15 +7,9 @@ final class FakeAnalysisCancelledException implements Exception {
   const FakeAnalysisCancelledException(this.requestId);
 
   final String requestId;
-
-  @override
-  String toString() => 'Analysis request "$requestId" was cancelled.';
 }
 
-/// Deterministic in-memory provider for feature fixtures and domain tests.
-///
-/// The caller owns request ids, so cancellation, retries, and golden fixtures
-/// remain repeatable without clocks, random values, or platform channels.
+/// Test-only deterministic provider. Production code must never depend on it.
 final class FakeAnalysisProvider implements AnalysisProvider {
   FakeAnalysisProvider({
     Map<String, AnalysisBundle> fixturesByDocumentId = const {},
@@ -34,9 +27,6 @@ final class FakeAnalysisProvider implements AnalysisProvider {
   bool isCancelled(String requestId) =>
       _cancelledRequestIds.contains(requestId);
 
-  void resetCancellation(String requestId) =>
-      _cancelledRequestIds.remove(requestId);
-
   @override
   Future<AnalysisBundle> analyze(AnalysisRequest request) async {
     _requests.add(request);
@@ -53,7 +43,6 @@ final class FakeAnalysisProvider implements AnalysisProvider {
       yield AnalysisCancelled(request.requestId);
       return;
     }
-
     final bundle = _fixtureFor(request);
     yield AnalysisStarted(
       request.requestId,
@@ -70,10 +59,6 @@ final class FakeAnalysisProvider implements AnalysisProvider {
         completedPositions: index + 1,
         totalPositions: bundle.moves.length,
       );
-    }
-    if (isCancelled(request.requestId)) {
-      yield AnalysisCancelled(request.requestId);
-      return;
     }
     yield AnalysisCompleted(request.requestId, bundle: bundle);
   }
@@ -92,11 +77,9 @@ final class FakeAnalysisProvider implements AnalysisProvider {
         'No analysis fixture registered for document "${request.document.id}".',
       );
     }
-    if (bundle.documentId != request.document.id) {
-      throw StateError('Fixture document id does not match the request.');
-    }
-    if (bundle.requestId != request.requestId) {
-      throw StateError('Fixture request id does not match the request.');
+    if (bundle.documentId != request.document.id ||
+        bundle.requestId != request.requestId) {
+      throw StateError('Fixture identity does not match the request.');
     }
     return bundle;
   }

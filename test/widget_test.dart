@@ -1,8 +1,13 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lizzieyzy_mobile/app/app.dart';
 
 void main() {
   testWidgets('launches the two-destination product shell', (tester) async {
+    tester.binding.platformDispatcher.localesTestValue = const <Locale>[
+      Locale('zh'),
+    ];
+    addTearDown(tester.binding.platformDispatcher.clearLocalesTestValue);
     await tester.pumpWidget(const LizzieYzyApp());
     await tester.pumpAndSettle();
 

@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lizzieyzy_mobile/domain/domain.dart';
 
+import '../support/fake_analysis_provider.dart';
 import 'test_fixtures.dart';
 
 void main() {

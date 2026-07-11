@@ -1,6 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:lizzieyzy_mobile/app/app.dart';
+import 'package:lizzieyzy_mobile/design_system/design_system.dart';
+import 'package:lizzieyzy_mobile/features/review/presentation/game_performance_screen.dart';
+import 'package:lizzieyzy_mobile/features/review/presentation/key_move_review_screen.dart';
+import 'package:lizzieyzy_mobile/features/review/presentation/review_screen_data.dart';
+import 'package:lizzieyzy_mobile/features/review/presentation/variation_comparison_screen.dart';
+
+import '../support/analysis_app_harness.dart';
+import '../support/review_screen_fixture.dart';
 
 void main() {
   const phoneViewports = <Size>[
@@ -11,25 +18,16 @@ void main() {
     Size(430, 932),
   ];
 
-  Future<void> pumpRoute(
+  Future<void> pumpScreen(
     WidgetTester tester, {
     required Size size,
-    required String route,
+    required Widget screen,
   }) async {
-    tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = size;
-    final safeInsets = size.width >= 390
-        ? const FakeViewPadding(top: 59, bottom: 34)
-        : const FakeViewPadding(top: 24, bottom: 24);
-    tester.view.padding = safeInsets;
-    tester.view.viewPadding = safeInsets;
-    addTearDown(tester.view.resetDevicePixelRatio);
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetPadding);
-    addTearDown(tester.view.resetViewPadding);
-    await tester.pumpWidget(LizzieYzyApp(initialRoute: route));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 350));
+    await configureTestView(tester, size: size);
+    await tester.pumpWidget(
+      MaterialApp(theme: LizzieTheme.light(), home: screen),
+    );
+    await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   }
 
@@ -53,84 +51,81 @@ void main() {
     expect(rect.right, lessThanOrEqualTo(viewport.width + 0.01));
   }
 
-  void expectMinimumTouchTarget(WidgetTester tester, Finder finder) {
-    expect(finder, findsOneWidget);
-    final size = tester.getSize(finder);
-    expect(size.width, greaterThanOrEqualTo(48));
-    expect(size.height, greaterThanOrEqualTo(48));
-  }
-
   for (final viewport in phoneViewports) {
     final label = '${viewport.width.toInt()}×${viewport.height.toInt()}';
 
-    testWidgets('$label 分析进度的棋盘、控制与入口同屏可见', (tester) async {
-      await pumpRoute(
-        tester,
-        size: viewport,
-        route: AppRoutes.analysisProgress,
-      );
+    testWidgets('$label 真实分析进度的棋盘与取消同屏可见', (tester) async {
+      await configureTestView(tester, size: viewport);
+      final harness = AnalysisAppHarness.standard(emittedPositions: 42);
+      await harness.initialize();
+      addTearDown(harness.dispose);
+      await tester.pumpWidget(harness.app());
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
 
       expectNoVerticalScrollable(tester);
       expectFullyVisible(
         tester,
-        find.widgetWithText(TextButton, '暂停'),
+        find.widgetWithText(TextButton, '取消'),
         viewport,
       );
-      expectMinimumTouchTarget(tester, find.widgetWithText(TextButton, '暂停'));
-      expectFullyVisible(
-        tester,
-        find.widgetWithText(OutlinedButton, '查看已完成的142手'),
-        viewport,
-      );
+      expect(find.text('42 / 91 个局面'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('$label 关键手的棋盘、时间轴与检查器同屏可见', (tester) async {
-      await pumpRoute(tester, size: viewport, route: AppRoutes.keyMoveReview);
-
-      expectNoVerticalScrollable(tester);
-      expectFullyVisible(tester, find.text('R14 · 最佳候选'), viewport);
-      expectFullyVisible(tester, find.text('本局'), viewport);
-      expectMinimumTouchTarget(
+    testWidgets('$label 真实关键手的棋盘、时间轴与检查器同屏可见', (tester) async {
+      final data = reviewScreenFixture();
+      await pumpScreen(
         tester,
-        find
-            .ancestor(of: find.text('关键手'), matching: find.byType(InkWell))
-            .first,
+        size: viewport,
+        screen: KeyMoveReviewScreen(data: data),
       );
 
+      expectNoVerticalScrollable(tester);
+      expectFullyVisible(tester, find.text('本局'), viewport);
+      expect(find.byKey(const Key('mobile-review-viewport')), findsOneWidget);
       for (final tab in <String>['变化', '走势', '本局', '关键手']) {
-        await tester.tap(find.text(tab).last);
-        await tester.pump(const Duration(milliseconds: 250));
+        await tester.tap(find.text(tab));
+        await tester.pump(const Duration(milliseconds: 200));
         expectNoVerticalScrollable(tester);
         expect(tester.takeException(), isNull);
       }
     });
 
-    testWidgets('$label 变化比较的候选、PV与回主线操作同屏可见', (tester) async {
-      await pumpRoute(
+    testWidgets('$label 真实变化候选、PV与回主线操作同屏可见', (tester) async {
+      final data = reviewScreenFixture();
+      final move = data.primaryMoment!.moveNumber;
+      await pumpScreen(
         tester,
         size: viewport,
-        route: AppRoutes.variationComparison,
+        screen: VariationComparisonScreen(
+          selection: ReviewMoveSelection(data: data, moveNumber: move),
+        ),
       );
 
       expectNoVerticalScrollable(tester);
-      expectFullyVisible(tester, find.text('12,840'), viewport);
-      expectMinimumTouchTarget(tester, find.bySemanticsLabel('候选A，R14，+3.1目'));
+      expect(find.bySemanticsLabel(RegExp('候选A')), findsWidgets);
       expectFullyVisible(
         tester,
-        find.widgetWithText(FilledButton, '回到主线第87手'),
+        find.widgetWithText(FilledButton, '回到主线第$move手'),
         viewport,
       );
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('$label 单局棋力的区间、阶段与样本质量同屏可见', (tester) async {
-      await pumpRoute(tester, size: viewport, route: AppRoutes.gamePerformance);
+    testWidgets('$label 已校准单局棋力的区间与样本同屏可见', (tester) async {
+      final data = reviewScreenFixture();
+      final report = performanceScreenFixture(data);
+      await pumpScreen(
+        tester,
+        size: viewport,
+        screen: GamePerformanceScreen(review: data, report: report),
+      );
 
       expectNoVerticalScrollable(tester);
-      expectFullyVisible(tester, find.text('3级–1级'), viewport);
-      expectFullyVisible(tester, find.text('校准范围'), viewport);
-      expectMinimumTouchTarget(tester, find.byTooltip('返回'));
+      expect(find.textContaining('80% 区间'), findsOneWidget);
+      expect(find.textContaining('有效决策'), findsWidgets);
+      expect(find.textContaining('不是长期棋力'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
   }

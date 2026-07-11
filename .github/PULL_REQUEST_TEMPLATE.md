@@ -7,11 +7,11 @@
 ## 验证证据
 
 - [ ] `dart format --output=none --set-exit-if-changed lib test`
-- [ ] `flutter analyze`
+- [ ] `flutter analyze --fatal-infos`
 - [ ] 非 golden 测试
 - [ ] `python3 .github/scripts/verify_visual_benchmarks.py`
-- [ ] Android debug 构建（涉及平台或发布时）
-- [ ] iOS Simulator 构建（涉及平台或发布时）
+- [ ] Android release 构建、最终 APK guards 与 crash-symbol 归档（涉及平台或发布时）
+- [ ] iOS device `--release --no-codesign`、打包隐私/许可与 dSYM UUID 门禁（涉及平台或发布时）
 
 测试命令、设备、系统版本和结果：
 

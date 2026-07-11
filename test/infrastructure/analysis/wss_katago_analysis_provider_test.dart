@@ -25,6 +25,50 @@ void main() {
       expect(config.endpoint.scheme, 'wss');
       expect(config.reportAnalysisWinratesAs.configValue, 'SIDETOMOVE');
     });
+
+    test('rejects endpoint-embedded credentials and invalid budgets', () {
+      for (final endpoint in <String>[
+        'wss://user:secret@analysis.example.test/v1',
+        'wss://analysis.example.test/v1?token=secret',
+        'wss://analysis.example.test/v1#secret',
+      ]) {
+        expect(
+          () => KataGoWssConfig(
+            endpoint: Uri.parse(endpoint),
+            reportAnalysisWinratesAs: KataGoReportPerspective.black,
+            model: _model,
+          ),
+          throwsArgumentError,
+        );
+      }
+      expect(
+        () => KataGoWssConfig(
+          endpoint: Uri.parse('wss://analysis.example.test/v1'),
+          reportAnalysisWinratesAs: KataGoReportPerspective.black,
+          model: _model,
+          maxInboundMessageBytes: 0,
+        ),
+        throwsArgumentError,
+      );
+      expect(
+        () => KataGoWssConfig(
+          endpoint: Uri.parse('wss://analysis.example.test/v1'),
+          reportAnalysisWinratesAs: KataGoReportPerspective.black,
+          model: _model,
+          analysisPvLength: 129,
+        ),
+        throwsArgumentError,
+      );
+    });
+
+    test('exposes bearer headers as an immutable map', () {
+      final headers = _config(
+        KataGoReportPerspective.black,
+        bearerToken: ' secret ',
+      ).connectionHeaders!;
+      expect(headers, {'Authorization': 'Bearer secret'});
+      expect(() => headers['Authorization'] = 'leak', throwsUnsupportedError);
+    });
   });
 
   group('WssKataGoAnalysisProvider protocol', () {
@@ -73,6 +117,240 @@ void main() {
       _sendStandardGame(socket, id: 'request-1');
       await eventsFuture;
     });
+
+    test(
+      'pins HumanSL override history and fails closed when humanPolicy is absent',
+      () async {
+        socket = _FakeWebSocketChannel();
+        connector = _ConnectorSpy(socket);
+        provider = _provider(
+          socket,
+          connector: connector,
+          model: _humanModel,
+          humanStyleProfile: GoRank.kyu(1),
+        );
+        final sent = socket.nextClientMessage;
+        final eventsFuture = provider.stream(_request(_record())).toList();
+        final query = jsonDecode(await sent) as Map<String, dynamic>;
+
+        expect(query['includePolicy'], isTrue);
+        expect(query['overrideSettings'], {
+          'humanSLProfile': 'rank_1k',
+          'ignorePreRootHistory': false,
+        });
+
+        // A normal policy is present, but it must never be substituted for the
+        // missing HumanSL policy required by the calibration.
+        socket.sendServer(
+          _response(
+            id: 'request-1',
+            turn: 0,
+            currentPlayer: 'B',
+            rootWinRate: .5,
+            rootScore: 0,
+            candidates: [_candidate('Q16', order: 0, winRate: .6)],
+          ),
+        );
+        await expectLater(
+          eventsFuture,
+          throwsA(
+            isA<KataGoProtocolException>().having(
+              (error) => error.field,
+              'field',
+              'humanPolicy',
+            ),
+          ),
+        );
+      },
+    );
+
+    test(
+      'stores HumanSL played-move policy without substituting main policy',
+      () async {
+        socket = _FakeWebSocketChannel();
+        connector = _ConnectorSpy(socket);
+        provider = _provider(
+          socket,
+          connector: connector,
+          model: _humanModel,
+          humanStyleProfile: GoRank.kyu(1),
+        );
+        final record = _record(
+          moves: const <Move>[
+            Move.play(color: StoneColor.black, point: BoardPoint(3, 3)),
+          ],
+        );
+        final sent = socket.nextClientMessage;
+        final eventsFuture = provider.stream(_request(record)).toList();
+        await sent;
+
+        socket.sendServer(
+          _response(
+            id: 'request-1',
+            turn: 0,
+            currentPlayer: 'B',
+            rootWinRate: .5,
+            rootScore: 0,
+            candidates: [_candidate('Q16', order: 0, winRate: .6)],
+            policyOverrides: const <String, double>{'D16': .25},
+            humanPolicyOverrides: const <String, double>{'D16': .004},
+          ),
+        );
+        socket.sendServer(
+          _response(
+            id: 'request-1',
+            turn: 1,
+            currentPlayer: 'W',
+            rootWinRate: .48,
+            rootScore: 1,
+            candidates: [_candidate('Q4', order: 0, winRate: .52)],
+            humanPolicyOverrides: const <String, double>{},
+          ),
+        );
+
+        final positions = (await eventsFuture)
+            .whereType<PositionAnalyzed>()
+            .toList(growable: false);
+        expect(positions[1].analysis.playedMovePolicy, .25);
+        expect(positions[1].analysis.playedMoveHumanPolicy, .004);
+      },
+    );
+
+    test('rejects illegal sentinels for rule-checked played moves', () async {
+      socket = _FakeWebSocketChannel();
+      connector = _ConnectorSpy(socket);
+      provider = _provider(socket, connector: connector);
+      final record = _record(
+        moves: const <Move>[
+          Move.play(color: StoneColor.black, point: BoardPoint(3, 3)),
+        ],
+      );
+      var sent = socket.nextClientMessage;
+      var future = provider.analyze(_request(record));
+      await sent;
+      socket.sendServer(
+        _response(
+          id: 'request-1',
+          turn: 0,
+          currentPlayer: 'B',
+          rootWinRate: .5,
+          rootScore: 0,
+          candidates: [_candidate('Q16', order: 0, winRate: .6)],
+          policyOverrides: const <String, double>{'D16': -1},
+        ),
+      );
+      socket.sendServer(
+        _response(
+          id: 'request-1',
+          turn: 1,
+          currentPlayer: 'W',
+          rootWinRate: .48,
+          rootScore: 1,
+          candidates: [_candidate('Q4', order: 0, winRate: .52)],
+        ),
+      );
+      await expectLater(
+        future,
+        throwsA(
+          isA<KataGoProtocolException>().having(
+            (error) => error.field,
+            'field',
+            startsWith('policy['),
+          ),
+        ),
+      );
+
+      await provider.close();
+      await socket.serverClose();
+      socket = _FakeWebSocketChannel();
+      connector = _ConnectorSpy(socket);
+      provider = _provider(
+        socket,
+        connector: connector,
+        model: _humanModel,
+        humanStyleProfile: GoRank.kyu(1),
+      );
+      sent = socket.nextClientMessage;
+      future = provider.analyze(_request(record));
+      await sent;
+      socket.sendServer(
+        _response(
+          id: 'request-1',
+          turn: 0,
+          currentPlayer: 'B',
+          rootWinRate: .5,
+          rootScore: 0,
+          candidates: [_candidate('Q16', order: 0, winRate: .6)],
+          humanPolicyOverrides: const <String, double>{'D16': -1},
+        ),
+      );
+      socket.sendServer(
+        _response(
+          id: 'request-1',
+          turn: 1,
+          currentPlayer: 'W',
+          rootWinRate: .48,
+          rootScore: 1,
+          candidates: [_candidate('Q4', order: 0, winRate: .52)],
+          humanPolicyOverrides: const <String, double>{},
+        ),
+      );
+      await expectLater(
+        future,
+        throwsA(
+          isA<KataGoProtocolException>().having(
+            (error) => error.field,
+            'field',
+            startsWith('humanPolicy['),
+          ),
+        ),
+      );
+    });
+
+    test(
+      'rejects an illegal policy fallback for a reported candidate',
+      () async {
+        socket = _FakeWebSocketChannel();
+        connector = _ConnectorSpy(socket);
+        provider = _provider(socket, connector: connector);
+        final sent = socket.nextClientMessage;
+        final future = provider.analyze(
+          _request(
+            PositionSnapshot(
+              id: 'candidate-policy',
+              position: BoardPosition.empty(BoardSize.nineteen),
+              rules: const GoRules.chinese(),
+              source: _source,
+              playerToMove: StoneColor.black,
+            ),
+          ),
+        );
+        await sent;
+        final candidate = _candidate('D16', order: 0, winRate: .5)
+          ..remove('prior');
+        socket.sendServer(
+          _response(
+            id: 'request-1',
+            turn: 0,
+            currentPlayer: 'B',
+            rootWinRate: .5,
+            rootScore: 0,
+            candidates: <Map<String, dynamic>>[candidate],
+            policyOverrides: const <String, double>{'D16': -1},
+          ),
+        );
+        await expectLater(
+          future,
+          throwsA(
+            isA<KataGoProtocolException>().having(
+              (error) => error.field,
+              'field',
+              startsWith('policy['),
+            ),
+          ),
+        );
+      },
+    );
 
     test(
       'sends a static setup as initialStones without invented moves',
@@ -168,6 +446,7 @@ void main() {
               ),
               _candidate('C3', order: 1, winRate: .46),
             ],
+            policyOverrides: const {'Q4': .013},
           ),
         );
         socket.sendServer(
@@ -187,6 +466,7 @@ void main() {
               ),
               _candidate('D16', order: 1, winRate: .54, scoreLead: 1),
             ],
+            policyOverrides: const {'D16': .007},
           ),
         );
 
@@ -207,8 +487,10 @@ void main() {
         expect(positions[0].analysis.ownership.first, .25);
         expect(positions[1].analysis.playedMovePointLoss, 3);
         expect(positions[1].analysis.playedMoveWinRateLoss, closeTo(.08, 1e-9));
+        expect(positions[1].analysis.playedMovePolicy, .007);
         expect(positions[2].analysis.playedMovePointLoss, 1);
         expect(positions[2].analysis.playedMoveWinRateLoss, closeTo(.10, 1e-9));
+        expect(positions[2].analysis.playedMovePolicy, .013);
         expect(
           positions[1].analysis.candidates.first.winRate,
           closeTo(.55, 1e-9),
@@ -357,7 +639,7 @@ void main() {
     });
 
     test(
-      'missing played move is a verifiable error, never zero loss',
+      'uses full policy and adjacent positions when played move is not Top-N',
       () async {
         socket = _FakeWebSocketChannel();
         connector = _ConnectorSpy(socket);
@@ -381,6 +663,7 @@ void main() {
             rootWinRate: .5,
             rootScore: 0,
             candidates: [_candidate('Q16', order: 0, winRate: .6)],
+            policyOverrides: const {'D16': .007},
           ),
         );
         socket.sendServer(
@@ -394,20 +677,55 @@ void main() {
           ),
         );
 
-        await expectLater(
-          future,
-          throwsA(
-            isA<KataGoMissingPlayedMoveException>()
-                .having((error) => error.turnNumber, 'turnNumber', 1)
-                .having(
-                  (error) => error.playedMove.point,
-                  'point',
-                  const BoardPoint(3, 3),
-                ),
+        final bundle = await future;
+        expect(
+          bundle.moves.first.candidates.any(
+            (candidate) => candidate.move.point == const BoardPoint(3, 3),
           ),
+          isFalse,
         );
+        expect(bundle.moves[1].playedMovePointLoss, 2);
+        expect(bundle.moves[1].playedMoveWinRateLoss, closeTo(.2, 1e-9));
+        expect(bundle.moves[1].playedMovePolicy, .007);
       },
     );
+
+    test('requires full policy when it was requested', () async {
+      socket = _FakeWebSocketChannel();
+      connector = _ConnectorSpy(socket);
+      provider = _provider(socket, connector: connector);
+      final sent = socket.nextClientMessage;
+      final future = provider.analyze(
+        _request(
+          _record(
+            moves: const [
+              Move.play(color: StoneColor.black, point: BoardPoint(3, 3)),
+            ],
+          ),
+        ),
+      );
+      await sent;
+      final response = _response(
+        id: 'request-1',
+        turn: 0,
+        currentPlayer: 'B',
+        rootWinRate: .5,
+        rootScore: 0,
+        candidates: [_candidate('Q16', order: 0, winRate: .6)],
+      )..remove('policy');
+      socket.sendServer(response);
+
+      await expectLater(
+        future,
+        throwsA(
+          isA<KataGoProtocolException>().having(
+            (error) => error.field,
+            'field',
+            'policy',
+          ),
+        ),
+      );
+    });
 
     test('routes server protocol errors only to their request id', () async {
       socket = _FakeWebSocketChannel();
@@ -444,14 +762,62 @@ void main() {
       await expectLater(
         a,
         throwsA(
-          isA<KataGoProtocolException>()
+          isA<KataGoRemoteException>()
               .having((error) => error.requestId, 'requestId', 'a')
-              .having((error) => error.field, 'field', 'rules'),
+              .having((error) => error.field, 'field', 'rules')
+              .having(
+                (error) => error.toString(),
+                'sanitized message',
+                isNot(contains('unsupported rules')),
+              ),
         ),
       );
       _sendOneMove(socket, id: 'b', actual: 'Q16');
       expect((await b).requestId, 'b');
     });
+
+    test(
+      'rejects a duplicate turn after its heavy buffer was released',
+      () async {
+        socket = _FakeWebSocketChannel();
+        connector = _ConnectorSpy(socket);
+        provider = _provider(socket, connector: connector);
+        final sent = socket.nextClientMessage;
+        final future = provider.analyze(_request(_record()));
+        await sent;
+        final root = _response(
+          id: 'request-1',
+          turn: 0,
+          currentPlayer: 'B',
+          rootWinRate: .5,
+          rootScore: 0,
+          candidates: [_candidate('D16', order: 0, winRate: .6)],
+        );
+        socket.sendServer(root);
+        socket.sendServer(
+          _response(
+            id: 'request-1',
+            turn: 1,
+            currentPlayer: 'W',
+            rootWinRate: .5,
+            rootScore: 0,
+            candidates: [_candidate('Q4', order: 0, winRate: .6)],
+          ),
+        );
+        socket.sendServer(root);
+
+        await expectLater(
+          future,
+          throwsA(
+            isA<KataGoProtocolException>().having(
+              (error) => error.field,
+              'field',
+              'turnNumber',
+            ),
+          ),
+        );
+      },
+    );
 
     test(
       'cancel sends terminate, emits cancelled, and closes the stream',
@@ -504,6 +870,539 @@ void main() {
       await socket.serverClose();
       await closedExpectation;
     });
+
+    test(
+      'close terminates requests and closes an in-flight handshake',
+      () async {
+        final ready = Completer<void>();
+        socket = _FakeWebSocketChannel(ready: ready.future);
+        connector = _ConnectorSpy(socket);
+        provider = _provider(socket, connector: connector);
+        final eventsFuture = provider.stream(_request(_record())).toList();
+        await Future<void>.delayed(Duration.zero);
+
+        await provider.close();
+
+        expect(socket.sink.closeCode, 1000);
+        expect(await eventsFuture, [
+          isA<AnalysisStarted>(),
+          isA<AnalysisCancelled>(),
+        ]);
+        ready.complete();
+        await Future<void>.delayed(Duration.zero);
+      },
+    );
+
+    test('rejects unsafe, repeated, and over-budget requests', () async {
+      socket = _FakeWebSocketChannel();
+      connector = _ConnectorSpy(socket);
+      provider = _provider(
+        socket,
+        connector: connector,
+        maxPositionsPerRequest: 2,
+      );
+
+      await expectLater(
+        provider.analyze(_request(_record(), requestId: 'unsafe id')),
+        throwsA(
+          isA<KataGoRequestException>().having(
+            (error) => error.field,
+            'field',
+            'requestId',
+          ),
+        ),
+      );
+      await expectLater(
+        provider.analyze(_request(_record(), requestId: 'too-many')),
+        throwsA(
+          isA<KataGoRequestException>().having(
+            (error) => error.field,
+            'field',
+            'moves',
+          ),
+        ),
+      );
+
+      final snapshot = PositionSnapshot(
+        id: 'once',
+        position: BoardPosition.empty(BoardSize.nineteen),
+        rules: const GoRules.chinese(),
+        source: _source,
+        playerToMove: StoneColor.black,
+      );
+      final sent = socket.nextClientMessage;
+      final first = provider.analyze(_request(snapshot, requestId: 'once'));
+      await sent;
+      socket.sendServer(
+        _response(
+          id: 'once',
+          turn: 0,
+          currentPlayer: 'B',
+          rootWinRate: .5,
+          rootScore: 0,
+          candidates: [_candidate('D16', order: 0, winRate: .5)],
+        ),
+      );
+      await first;
+      await expectLater(
+        provider.analyze(_request(snapshot, requestId: 'once')),
+        throwsA(isA<KataGoRequestException>()),
+      );
+    });
+
+    test('aborts oversized, deeply nested, and invalid UTF-8 frames', () async {
+      Future<void> expectRejectedFrame({
+        required dynamic frame,
+        required KataGoWssConfig config,
+      }) async {
+        await provider.close();
+        await socket.serverClose();
+        socket = _FakeWebSocketChannel();
+        connector = _ConnectorSpy(socket);
+        provider = WssKataGoAnalysisProvider(
+          config: config,
+          connector: connector.call,
+        );
+        final sent = socket.nextClientMessage;
+        final future = provider.analyze(
+          _request(
+            PositionSnapshot(
+              id: 'frame-test',
+              position: BoardPosition.empty(BoardSize.nineteen),
+              rules: const GoRules.chinese(),
+              source: _source,
+              playerToMove: StoneColor.black,
+            ),
+          ),
+        );
+        await sent;
+        socket.sendRaw(frame);
+        await expectLater(future, throwsA(isA<KataGoAnalysisException>()));
+        expect(socket.sink.closeCode, 1002);
+      }
+
+      socket = _FakeWebSocketChannel();
+      connector = _ConnectorSpy(socket);
+      provider = _provider(socket, connector: connector);
+
+      await expectRejectedFrame(
+        frame: 'x' * 65,
+        config: _config(
+          KataGoReportPerspective.black,
+          maxInboundMessageBytes: 64,
+        ),
+      );
+      await expectRejectedFrame(
+        frame: '{"a":[[[]]]}',
+        config: _config(KataGoReportPerspective.black, maxJsonNestingDepth: 3),
+      );
+      await expectRejectedFrame(
+        frame: <int>[0xFF],
+        config: _config(KataGoReportPerspective.black),
+      );
+    });
+
+    test('bounds candidates, PV, and response-message volume', () async {
+      socket = _FakeWebSocketChannel();
+      connector = _ConnectorSpy(socket);
+      provider = _provider(
+        socket,
+        connector: connector,
+        maxResponseCandidates: 3,
+      );
+      var sent = socket.nextClientMessage;
+      var future = provider.analyze(
+        _request(
+          PositionSnapshot(
+            id: 'candidate-limit',
+            position: BoardPosition.empty(BoardSize.nineteen),
+            rules: const GoRules.chinese(),
+            source: _source,
+            playerToMove: StoneColor.black,
+          ),
+        ),
+      );
+      await sent;
+      socket.sendServer(
+        _response(
+          id: 'request-1',
+          turn: 0,
+          currentPlayer: 'B',
+          rootWinRate: .5,
+          rootScore: 0,
+          candidates: [
+            _candidate('D16', order: 0, winRate: .5),
+            _candidate('Q16', order: 1, winRate: .5),
+            _candidate('C3', order: 2, winRate: .5),
+            _candidate('R17', order: 3, winRate: .5),
+          ],
+        ),
+      );
+      await expectLater(future, throwsA(isA<KataGoResponseLimitException>()));
+      expect(socket.sink.closeCode, 1002);
+
+      await provider.close();
+      await socket.serverClose();
+      socket = _FakeWebSocketChannel();
+      connector = _ConnectorSpy(socket);
+      provider = _provider(socket, connector: connector, analysisPvLength: 1);
+      sent = socket.nextClientMessage;
+      future = provider.analyze(
+        _request(
+          PositionSnapshot(
+            id: 'pv-limit',
+            position: BoardPosition.empty(BoardSize.nineteen),
+            rules: const GoRules.chinese(),
+            source: _source,
+            playerToMove: StoneColor.black,
+          ),
+          requestId: 'pv-limit',
+        ),
+      );
+      await sent;
+      socket.sendServer(
+        _response(
+          id: 'pv-limit',
+          turn: 0,
+          currentPlayer: 'B',
+          rootWinRate: .5,
+          rootScore: 0,
+          candidates: [
+            _candidate('D16', order: 0, winRate: .5, pv: ['D16', 'Q4']),
+          ],
+        ),
+      );
+      await expectLater(future, throwsA(isA<KataGoResponseLimitException>()));
+
+      await provider.close();
+      await socket.serverClose();
+      socket = _FakeWebSocketChannel();
+      connector = _ConnectorSpy(socket);
+      provider = _provider(
+        socket,
+        connector: connector,
+        maxResponseMessagesPerRequest: 1,
+      );
+      sent = socket.nextClientMessage;
+      future = provider.analyze(
+        _request(
+          PositionSnapshot(
+            id: 'message-limit',
+            position: BoardPosition.empty(BoardSize.nineteen),
+            rules: const GoRules.chinese(),
+            source: _source,
+            playerToMove: StoneColor.black,
+          ),
+          requestId: 'message-limit',
+        ),
+      );
+      await sent;
+      socket.sendServer(
+        _response(
+          id: 'message-limit',
+          turn: 0,
+          currentPlayer: 'B',
+          rootWinRate: .5,
+          rootScore: 0,
+          isDuringSearch: true,
+          candidates: [_candidate('D16', order: 0, winRate: .5)],
+        ),
+      );
+      socket.sendServer(
+        _response(
+          id: 'message-limit',
+          turn: 0,
+          currentPlayer: 'B',
+          rootWinRate: .5,
+          rootScore: 0,
+          candidates: [_candidate('D16', order: 0, winRate: .5)],
+        ),
+      );
+      await expectLater(future, throwsA(isA<KataGoResponseLimitException>()));
+
+      await provider.close();
+      await socket.serverClose();
+      socket = _FakeWebSocketChannel();
+      connector = _ConnectorSpy(socket);
+      provider = _provider(
+        socket,
+        connector: connector,
+        maxBufferedResponseBytesPerRequest: 512,
+      );
+      sent = socket.nextClientMessage;
+      future = provider.analyze(
+        _request(
+          PositionSnapshot(
+            id: 'buffer-limit',
+            position: BoardPosition.empty(BoardSize.nineteen),
+            rules: const GoRules.chinese(),
+            source: _source,
+            playerToMove: StoneColor.black,
+          ),
+          requestId: 'buffer-limit',
+        ),
+      );
+      await sent;
+      socket.sendServer(
+        _response(
+          id: 'buffer-limit',
+          turn: 0,
+          currentPlayer: 'B',
+          rootWinRate: .5,
+          rootScore: 0,
+          candidates: [_candidate('D16', order: 0, winRate: .5)],
+        ),
+      );
+      await expectLater(future, throwsA(isA<KataGoResponseLimitException>()));
+    });
+
+    test('warnings consume request budgets and must be scoped', () async {
+      socket = _FakeWebSocketChannel();
+      connector = _ConnectorSpy(socket);
+      provider = _provider(
+        socket,
+        connector: connector,
+        maxResponseMessagesPerRequest: 1,
+      );
+      var sent = socket.nextClientMessage;
+      var future = provider.analyze(
+        _request(
+          PositionSnapshot(
+            id: 'warning-budget',
+            position: BoardPosition.empty(BoardSize.nineteen),
+            rules: const GoRules.chinese(),
+            source: _source,
+            playerToMove: StoneColor.black,
+          ),
+          requestId: 'warning-budget',
+        ),
+      );
+      await sent;
+      socket.sendServer(<String, dynamic>{
+        'id': 'warning-budget',
+        'warning': 'rules normalized',
+        'field': 'rules',
+      });
+      socket.sendServer(
+        _response(
+          id: 'warning-budget',
+          turn: 0,
+          currentPlayer: 'B',
+          rootWinRate: .5,
+          rootScore: 0,
+          candidates: [_candidate('D16', order: 0, winRate: .5)],
+        ),
+      );
+      await expectLater(future, throwsA(isA<KataGoResponseLimitException>()));
+
+      await provider.close();
+      await socket.serverClose();
+      socket = _FakeWebSocketChannel();
+      connector = _ConnectorSpy(socket);
+      provider = _provider(socket, connector: connector);
+      sent = socket.nextClientMessage;
+      future = provider.analyze(
+        _request(
+          PositionSnapshot(
+            id: 'unscoped-warning',
+            position: BoardPosition.empty(BoardSize.nineteen),
+            rules: const GoRules.chinese(),
+            source: _source,
+            playerToMove: StoneColor.black,
+          ),
+        ),
+      );
+      await sent;
+      socket.sendServer(<String, dynamic>{'warning': 'unscoped'});
+      await expectLater(future, throwsA(isA<KataGoProtocolException>()));
+      expect(socket.sink.closeCode, 1002);
+
+      await provider.close();
+      await socket.serverClose();
+      socket = _FakeWebSocketChannel();
+      connector = _ConnectorSpy(socket);
+      provider = _provider(
+        socket,
+        connector: connector,
+        maxResponseBytesPerRequest: 80,
+      );
+      sent = socket.nextClientMessage;
+      future = provider.analyze(
+        _request(
+          PositionSnapshot(
+            id: 'warning-bytes',
+            position: BoardPosition.empty(BoardSize.nineteen),
+            rules: const GoRules.chinese(),
+            source: _source,
+            playerToMove: StoneColor.black,
+          ),
+          requestId: 'warning-bytes',
+        ),
+      );
+      await sent;
+      socket.sendServer(<String, dynamic>{
+        'id': 'warning-bytes',
+        'warning': 'normalized',
+        'field': 'rules',
+      });
+      socket.sendServer(
+        _response(
+          id: 'warning-bytes',
+          turn: 0,
+          currentPlayer: 'B',
+          rootWinRate: .5,
+          rootScore: 0,
+          candidates: [_candidate('D16', order: 0, winRate: .5)],
+        ),
+      );
+      await expectLater(future, throwsA(isA<KataGoResponseLimitException>()));
+    });
+
+    test('rejects unsolicited or replayed action acknowledgements', () async {
+      socket = _FakeWebSocketChannel();
+      connector = _ConnectorSpy(socket);
+      provider = _provider(socket, connector: connector);
+      final sent = socket.nextClientMessage;
+      final future = provider.analyze(
+        _request(
+          PositionSnapshot(
+            id: 'action-ack',
+            position: BoardPosition.empty(BoardSize.nineteen),
+            rules: const GoRules.chinese(),
+            source: _source,
+            playerToMove: StoneColor.black,
+          ),
+        ),
+      );
+      await sent;
+      socket.sendServer(<String, dynamic>{
+        'id': '__lizzieyzy_terminate_999',
+        'action': 'terminate',
+        'terminateId': 'request-1',
+      });
+      await expectLater(future, throwsA(isA<KataGoProtocolException>()));
+      expect(socket.sink.closeCode, 1002);
+    });
+
+    test(
+      'unknown ids abort the socket while late cancelled ids are ignored',
+      () async {
+        socket = _FakeWebSocketChannel();
+        connector = _ConnectorSpy(socket);
+        provider = _provider(socket, connector: connector);
+        var sent = socket.nextClientMessage;
+        var future = provider.analyze(
+          _request(
+            PositionSnapshot(
+              id: 'unknown-test',
+              position: BoardPosition.empty(BoardSize.nineteen),
+              rules: const GoRules.chinese(),
+              source: _source,
+              playerToMove: StoneColor.black,
+            ),
+            requestId: 'known',
+          ),
+        );
+        await sent;
+        socket.sendServer(
+          _response(
+            id: 'unknown',
+            turn: 0,
+            currentPlayer: 'B',
+            rootWinRate: .5,
+            rootScore: 0,
+            candidates: [_candidate('D16', order: 0, winRate: .5)],
+          ),
+        );
+        await expectLater(future, throwsA(isA<KataGoProtocolException>()));
+        expect(socket.sink.closeCode, 1002);
+
+        await provider.close();
+        await socket.serverClose();
+        socket = _FakeWebSocketChannel();
+        connector = _ConnectorSpy(socket);
+        provider = _provider(socket, connector: connector);
+        final lateSnapshot = PositionSnapshot(
+          id: 'late-snapshot',
+          position: BoardPosition.empty(BoardSize.nineteen),
+          rules: const GoRules.chinese(),
+          source: _source,
+          playerToMove: StoneColor.black,
+        );
+        sent = socket.nextClientMessage;
+        final cancelled = provider
+            .stream(_request(lateSnapshot, requestId: 'cancelled'))
+            .toList();
+        await sent;
+        await provider.cancel('cancelled');
+        await cancelled;
+
+        sent = socket.nextClientMessage;
+        future = provider.analyze(_request(lateSnapshot, requestId: 'active'));
+        await sent;
+        socket.sendServer(
+          _response(
+            id: 'cancelled',
+            turn: 0,
+            currentPlayer: 'B',
+            rootWinRate: .5,
+            rootScore: 0,
+            candidates: [_candidate('D16', order: 0, winRate: .5)],
+          ),
+        );
+        socket.sendServer(
+          _response(
+            id: 'active',
+            turn: 0,
+            currentPlayer: 'B',
+            rootWinRate: .5,
+            rootScore: 0,
+            candidates: [_candidate('D16', order: 0, winRate: .5)],
+          ),
+        );
+        expect((await future).requestId, 'active');
+      },
+    );
+
+    test(
+      'times out analysis, terminates it, and redacts connector errors',
+      () async {
+        socket = _FakeWebSocketChannel();
+        connector = _ConnectorSpy(socket);
+        provider = _provider(
+          socket,
+          connector: connector,
+          analysisTimeout: const Duration(milliseconds: 10),
+        );
+        final sent = socket.nextClientMessage;
+        final future = provider.analyze(_request(_record()));
+        await sent;
+        await expectLater(future, throwsA(isA<KataGoTimeoutException>()));
+        expect(
+          jsonDecode(socket.sink.messages.last),
+          containsPair('terminateId', 'request-1'),
+        );
+
+        await provider.close();
+        await socket.serverClose();
+        socket = _FakeWebSocketChannel();
+        const secret = 'do-not-leak-token';
+        provider = WssKataGoAnalysisProvider(
+          config: _config(KataGoReportPerspective.black, bearerToken: secret),
+          connector: (_, {headers, connectTimeout}) =>
+              throw KataGoConnectionException(
+                '$secret ${headers?['Authorization']}',
+              ),
+        );
+        try {
+          await provider.analyze(_request(_record()));
+          fail('Expected a connection exception.');
+        } on KataGoConnectionException catch (error) {
+          expect(error.toString(), isNot(contains(secret)));
+          expect(error.toString(), isNot(contains('Bearer')));
+        }
+      },
+    );
   });
 }
 
@@ -518,27 +1417,80 @@ final _model = ModelManifest(
   license: 'CC-BY-4.0',
 );
 
+final _humanModel = ModelManifest(
+  id: 'human-sl-b10',
+  displayName: 'HumanSL b10',
+  sha256: List.filled(64, 'b').join(),
+  engineVersion: '1.16.5',
+  modelVersion: 'b10-human-sl-test',
+  license: 'CC-BY-4.0',
+  humanModelSha256: List.filled(64, 'c').join(),
+  humanStyleRanks: <GoRank>[GoRank.kyu(1)],
+);
+
 KataGoWssConfig _config(
   KataGoReportPerspective perspective, {
+  ModelManifest? model,
+  GoRank? humanStyleProfile,
   String? bearerToken,
   Duration timeout = const Duration(seconds: 1),
+  Duration analysisTimeout = const Duration(minutes: 45),
+  int analysisPvLength = 12,
+  int maxInboundMessageBytes = 8 * 1024 * 1024,
+  int maxJsonNestingDepth = 32,
+  int maxPositionsPerRequest = 1000,
+  int maxResponseCandidates = 362,
+  int maxResponseMessagesPerRequest = 16384,
+  int maxResponseBytesPerRequest = 128 * 1024 * 1024,
+  int maxBufferedResponseBytesPerRequest = 16 * 1024 * 1024,
 }) => KataGoWssConfig(
   endpoint: Uri.parse('wss://analysis.example.test/v1'),
   reportAnalysisWinratesAs: perspective,
-  model: _model,
+  model: model ?? _model,
+  humanStyleProfile: humanStyleProfile,
   bearerToken: bearerToken,
   connectionTimeout: timeout,
-  analysisPvLength: 12,
+  analysisTimeout: analysisTimeout,
+  analysisPvLength: analysisPvLength,
+  maxInboundMessageBytes: maxInboundMessageBytes,
+  maxJsonNestingDepth: maxJsonNestingDepth,
+  maxPositionsPerRequest: maxPositionsPerRequest,
+  maxResponseCandidates: maxResponseCandidates,
+  maxResponseMessagesPerRequest: maxResponseMessagesPerRequest,
+  maxResponseBytesPerRequest: maxResponseBytesPerRequest,
+  maxBufferedResponseBytesPerRequest: maxBufferedResponseBytesPerRequest,
 );
 
 WssKataGoAnalysisProvider _provider(
   _FakeWebSocketChannel socket, {
   required _ConnectorSpy connector,
   KataGoReportPerspective perspective = KataGoReportPerspective.black,
+  ModelManifest? model,
+  GoRank? humanStyleProfile,
   String? bearerToken,
   Duration timeout = const Duration(seconds: 1),
+  Duration analysisTimeout = const Duration(minutes: 45),
+  int analysisPvLength = 12,
+  int maxPositionsPerRequest = 1000,
+  int maxResponseCandidates = 362,
+  int maxResponseMessagesPerRequest = 16384,
+  int maxResponseBytesPerRequest = 128 * 1024 * 1024,
+  int maxBufferedResponseBytesPerRequest = 16 * 1024 * 1024,
 }) => WssKataGoAnalysisProvider(
-  config: _config(perspective, bearerToken: bearerToken, timeout: timeout),
+  config: _config(
+    perspective,
+    model: model,
+    humanStyleProfile: humanStyleProfile,
+    bearerToken: bearerToken,
+    timeout: timeout,
+    analysisTimeout: analysisTimeout,
+    analysisPvLength: analysisPvLength,
+    maxPositionsPerRequest: maxPositionsPerRequest,
+    maxResponseCandidates: maxResponseCandidates,
+    maxResponseMessagesPerRequest: maxResponseMessagesPerRequest,
+    maxResponseBytesPerRequest: maxResponseBytesPerRequest,
+    maxBufferedResponseBytesPerRequest: maxBufferedResponseBytesPerRequest,
+  ),
   connector: connector.call,
   clock: () => DateTime.utc(2026, 7, 11, 8),
 );
@@ -598,19 +1550,47 @@ Map<String, dynamic> _response({
   required List<Map<String, dynamic>> candidates,
   bool isDuringSearch = false,
   double ownership = .25,
-}) => {
-  'id': id,
-  'isDuringSearch': isDuringSearch,
-  'turnNumber': turn,
-  'rootInfo': {
-    'currentPlayer': currentPlayer,
-    'winrate': rootWinRate,
-    'scoreLead': rootScore,
-    'visits': 1000,
-  },
-  'moveInfos': candidates,
-  'ownership': List<double>.filled(19 * 19, ownership),
-};
+  Map<String, double> policyOverrides = const {},
+  Map<String, double>? humanPolicyOverrides,
+}) {
+  final policy = List<double>.filled(19 * 19 + 1, .001);
+  for (final entry in policyOverrides.entries) {
+    policy[_policyIndex(entry.key)] = entry.value;
+  }
+  List<double>? humanPolicy;
+  if (humanPolicyOverrides case final overrides?) {
+    humanPolicy = List<double>.filled(19 * 19 + 1, .001);
+    for (final entry in overrides.entries) {
+      humanPolicy[_policyIndex(entry.key)] = entry.value;
+    }
+  }
+  return {
+    'id': id,
+    'isDuringSearch': isDuringSearch,
+    'turnNumber': turn,
+    'rootInfo': {
+      'currentPlayer': currentPlayer,
+      'winrate': rootWinRate,
+      'scoreLead': rootScore,
+      'visits': 1000,
+    },
+    'moveInfos': candidates,
+    'policy': policy,
+    'humanPolicy': ?humanPolicy,
+    'ownership': List<double>.filled(19 * 19, ownership),
+  };
+}
+
+int _policyIndex(String move) {
+  if (move.toLowerCase() == 'pass') return 19 * 19;
+  const columns = 'ABCDEFGHJKLMNOPQRST';
+  final column = columns.indexOf(move[0].toUpperCase());
+  final row = 19 - int.parse(move.substring(1));
+  if (column < 0 || row < 0 || row >= 19) {
+    throw ArgumentError.value(move, 'move');
+  }
+  return row * 19 + column;
+}
 
 void _sendStandardGame(_FakeWebSocketChannel socket, {required String id}) {
   socket.sendServer(
@@ -735,6 +1715,10 @@ final class _FakeWebSocketChannel extends StreamChannelMixin<dynamic>
 
   void sendServer(Map<String, dynamic> json) {
     _server.add(jsonEncode(json));
+  }
+
+  void sendRaw(dynamic data) {
+    _server.add(data);
   }
 
   Future<void> serverClose() async {

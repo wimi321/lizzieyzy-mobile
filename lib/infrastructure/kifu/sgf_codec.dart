@@ -1,4 +1,5 @@
 import '../../domain/domain.dart';
+import 'kifu_resource_limits.dart';
 import 'sgf_parser.dart';
 
 enum SgfImportWarningCode {
@@ -7,6 +8,7 @@ enum SgfImportWarningCode {
   moveNumberGap,
   midGameSetup,
   turnOverride,
+  handicapMismatch,
   ruleViolation,
   duplicateOccupiedPoint,
 }
@@ -73,6 +75,7 @@ final class SgfCodec {
     _validateSingleValue(root, 'FF', source);
     _validateSingleValue(root, 'GM', source);
     _validateSingleValue(root, 'SZ', source);
+    _validateSingleValue(root, 'HA', source);
 
     final fileFormat = _parseInteger(
       root['FF']?.values.single ?? '4',
@@ -109,6 +112,13 @@ final class SgfCodec {
     _validateCoordinates(tree, boardSize, source);
 
     final normalizedRoot = tree.sequence.first;
+    final handicapValue = _singleValue(normalizedRoot, 'HA', source);
+    final handicap = handicapValue == null
+        ? null
+        : _parseInteger(handicapValue, 'HA', source);
+    if (handicap != null && handicap < 0) {
+      throw SgfFormatException('HA must be a non-negative integer.', source, 0);
+    }
     final rulesResult = _rulesFrom(normalizedRoot, source);
     if (rulesResult.warning != null) warnings.add(rulesResult.warning!);
     final rules = rulesResult.rules;
@@ -155,11 +165,30 @@ final class SgfCodec {
       moves.add(move);
       sawMove = true;
     }
+    syntaxParser.limits.enforceMoves(moves.length);
 
     final initialPosition = BoardPosition(size: boardSize, stones: setup);
+    final handicapMismatch =
+        handicap != null &&
+        (setup.values.where((stone) => stone == StoneColor.black).length !=
+                handicap ||
+            (handicap > 0 &&
+                setup.values.any((stone) => stone == StoneColor.white)) ||
+            (handicap > 1 &&
+                explicitPlayerToMove != null &&
+                explicitPlayerToMove != StoneColor.white));
+    if (handicapMismatch) {
+      warnings.add(
+        const SgfImportWarning(
+          code: SgfImportWarningCode.handicapMismatch,
+          message:
+              'HA, setup stones, and the declared player to move are inconsistent.',
+        ),
+      );
+    }
     final firstPlayer =
         explicitPlayerToMove ??
-        (moves.isEmpty ? StoneColor.black : moves.first.color);
+        ((handicap ?? 0) > 1 ? StoneColor.white : StoneColor.black);
 
     if (hasMidGameSetup) {
       warnings.add(
@@ -222,6 +251,7 @@ final class SgfCodec {
         firstPlayer,
         boardSize,
         source,
+        syntaxParser.limits,
       ),
     );
     final canVerify =
@@ -229,6 +259,7 @@ final class SgfCodec {
         rulesResult.warning == null &&
         !hasMidGameSetup &&
         !hasTurnOverride &&
+        !handicapMismatch &&
         numberingIsComplete &&
         startingMoveNumber == 1;
 
@@ -280,10 +311,90 @@ final class SgfCodec {
   }
 
   String encode(KifuDocument document, {bool preserveSourceTree = true}) {
-    final tree = preserveSourceTree && document.sourceSgf != null
-        ? document.sourceSgf!
+    final tree = preserveSourceTree
+        ? _treeForLosslessEncoding(document)
         : _treeFromDocument(document);
     return encodeTree(tree);
+  }
+
+  SgfGameTree _treeForLosslessEncoding(KifuDocument document) {
+    final source = document.sourceSgf;
+    if (source == null) return _treeFromDocument(document);
+
+    // A snapshot is the one imported document users can currently amend
+    // (notably PL / player-to-move). Overlay every domain-owned root property
+    // while retaining comments and other unknown SGF properties verbatim.
+    if (document is PositionSnapshot) {
+      return _overlaySnapshotRoot(source, _treeFromDocument(document));
+    }
+
+    // Preserve a source tree, including branches and unknown properties, only
+    // while it still describes the current domain document. If a future editor
+    // changes moves or metadata without updating sourceSgf, canonical output is
+    // safer than persisting stale state.
+    try {
+      final sourceDocument = decode(
+        encodeTree(source),
+        documentId: document.id,
+        kifuSource: document.source,
+      ).document;
+      if (_canonicalSemanticEncoding(sourceDocument) ==
+          _canonicalSemanticEncoding(document)) {
+        return source;
+      }
+    } on Object {
+      // sourceSgf is provenance, never the authority for persistence.
+    }
+    return _treeFromDocument(document);
+  }
+
+  String _canonicalSemanticEncoding(KifuDocument document) =>
+      encodeTree(_treeFromDocument(document));
+
+  SgfGameTree _overlaySnapshotRoot(SgfGameTree source, SgfGameTree canonical) {
+    const owned = <String>{
+      'FF',
+      'GM',
+      'SZ',
+      'KM',
+      'RU',
+      'PB',
+      'PW',
+      'EV',
+      'DT',
+      'RE',
+      'AB',
+      'AW',
+      'AE',
+      'PL',
+      'HA',
+    };
+    SgfGameTree scrub(SgfGameTree tree, {required bool root}) {
+      final sequence = <SgfNode>[];
+      for (var index = 0; index < tree.sequence.length; index++) {
+        final retained = tree.sequence[index].properties.values.where(
+          (property) => !owned.contains(property.identifier),
+        );
+        sequence.add(
+          SgfNode(
+            properties: <SgfProperty>[
+              if (root && index == 0)
+                ...canonical.sequence.first.properties.values,
+              ...retained,
+            ],
+          ),
+        );
+      }
+      return SgfGameTree(
+        sequence: sequence,
+        variations: <SgfGameTree>[
+          for (final variation in tree.variations)
+            scrub(variation, root: false),
+        ],
+      );
+    }
+
+    return scrub(source, root: true);
   }
 
   String encodeTree(SgfGameTree tree) => _SgfWriter().writeTree(tree);
@@ -558,8 +669,10 @@ List<SgfImportWarning> _alternateVariationWarnings(
   StoneColor firstPlayer,
   BoardSize size,
   String source,
+  KifuResourceLimits limits,
 ) {
   final warnings = <SgfImportWarning>[];
+  var replayWork = 0;
 
   void walk(
     SgfGameTree tree,
@@ -568,6 +681,8 @@ List<SgfImportWarning> _alternateVariationWarnings(
     String path,
     bool inheritedMidGameSetup,
   ) {
+    replayWork += prefix.length + tree.sequence.length;
+    limits.enforceReplayWork(replayWork);
     final moves = List<Move>.of(prefix);
     var containsMidGameSetup = inheritedMidGameSetup;
     for (final node in tree.sequence) {
@@ -591,6 +706,9 @@ List<SgfImportWarning> _alternateVariationWarnings(
       return;
     }
     if (isMainline) return;
+
+    replayWork += moves.length;
+    limits.enforceReplayWork(replayWork);
 
     if (containsMidGameSetup) {
       warnings.add(

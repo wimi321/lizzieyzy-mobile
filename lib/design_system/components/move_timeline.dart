@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:lizzieyzy_mobile/l10n/l10n.dart';
 
 import '../tokens.dart';
 
@@ -9,29 +10,36 @@ class MoveTimeline extends StatelessWidget {
     required this.onChanged,
     super.key,
     this.keyMoves = const <int>[],
-    this.label = '手数',
+    this.label,
+    this.minimumMove = 0,
   }) : assert(totalMoves >= 0),
-       assert(currentMove >= 0),
+       assert(minimumMove >= 0),
+       assert(minimumMove <= totalMoves || totalMoves == 0),
+       assert(currentMove >= minimumMove),
        assert(currentMove <= totalMoves);
 
   final int currentMove;
   final int totalMoves;
   final List<int> keyMoves;
   final ValueChanged<int>? onChanged;
-  final String label;
+  final String? label;
+  final int minimumMove;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final canGoBack = onChanged != null && currentMove > 0;
+    final l10n = context.l10n;
+    final resolvedLabel = label ?? l10n.timelineLabel;
+    final canGoBack = onChanged != null && currentMove > minimumMove;
     final canGoForward = onChanged != null && currentMove < totalMoves;
+    final moveRange = totalMoves - minimumMove;
     final max = totalMoves == 0 ? 1.0 : totalMoves.toDouble();
-    final value = currentMove.clamp(0, totalMoves).toDouble();
+    final value = currentMove.clamp(minimumMove, totalMoves).toDouble();
     final textScale = MediaQuery.textScalerOf(context).scale(1);
 
     return Semantics(
       container: true,
-      label: '$label，第 $currentMove 手，共 $totalMoves 手',
+      label: l10n.timelineSemantics(resolvedLabel, currentMove, totalMoves),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
@@ -51,7 +59,7 @@ class MoveTimeline extends StatelessWidget {
           else
             Row(
               children: <Widget>[
-                Text(label, style: theme.textTheme.labelMedium),
+                Text(resolvedLabel, style: theme.textTheme.labelMedium),
                 const Spacer(),
                 Text(
                   '$currentMove / $totalMoves',
@@ -67,7 +75,7 @@ class MoveTimeline extends StatelessWidget {
             child: Row(
               children: <Widget>[
                 IconButton(
-                  tooltip: '上一手',
+                  tooltip: l10n.previousMove,
                   onPressed: canGoBack
                       ? () => onChanged!.call(currentMove - 1)
                       : null,
@@ -91,13 +99,13 @@ class MoveTimeline extends StatelessWidget {
                         ),
                       Slider(
                         value: value,
-                        min: 0,
+                        min: minimumMove.toDouble(),
                         max: max,
-                        divisions: totalMoves == 0 ? null : totalMoves,
-                        label: '第 $currentMove 手',
-                        semanticFormatterCallback: (_) =>
-                            '第 $currentMove 手，共 $totalMoves 手',
-                        onChanged: totalMoves == 0 || onChanged == null
+                        divisions: moveRange <= 0 ? null : moveRange,
+                        label: l10n.moveOrdinal(currentMove),
+                        semanticFormatterCallback: (move) =>
+                            l10n.sliderMoveSemantics(move.round(), totalMoves),
+                        onChanged: moveRange <= 0 || onChanged == null
                             ? null
                             : (next) => onChanged!.call(next.round()),
                       ),
@@ -105,7 +113,7 @@ class MoveTimeline extends StatelessWidget {
                   ),
                 ),
                 IconButton(
-                  tooltip: '下一手',
+                  tooltip: l10n.nextMove,
                   onPressed: canGoForward
                       ? () => onChanged!.call(currentMove + 1)
                       : null,

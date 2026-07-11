@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:lizzieyzy_mobile/design_system/design_system.dart';
+import 'package:lizzieyzy_mobile/l10n/l10n.dart';
 
 class FeatureTopBar extends StatelessWidget {
   const FeatureTopBar({
@@ -193,8 +194,14 @@ class BackCircleButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final appLocalizations = Localizations.of<AppLocalizations>(
+      context,
+      AppLocalizations,
+    );
     return IconButton(
-      tooltip: '返回',
+      tooltip:
+          appLocalizations?.back ??
+          MaterialLocalizations.of(context).backButtonTooltip,
       onPressed: onPressed ?? () => Navigator.maybePop(context),
       icon: const Icon(Icons.arrow_back_rounded),
     );

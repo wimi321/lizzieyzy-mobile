@@ -1,0 +1,10 @@
+.venv/
+.ruff_cache/
+__pycache__/
+*.py[cod]
+*.pem
+*.key
+*.crt
+*.token
+service-manifest.json
+bridge-artifact-manifest.json

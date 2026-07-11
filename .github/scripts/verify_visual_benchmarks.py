@@ -106,11 +106,82 @@ def load_manifest() -> dict[str, Any]:
         fail(f"manifest.json is invalid JSON: {error}")
 
 
+def prompt_catalog(manifest: dict[str, Any]) -> set[str]:
+    generator = require_mapping(manifest.get("generator"), "manifest.generator")
+    require_string(generator.get("mode"), "manifest.generator.mode")
+    require_string(generator.get("model"), "manifest.generator.model")
+    relative_name = require_string(
+        generator.get("promptCatalog"), "manifest.generator.promptCatalog"
+    )
+    relative = Path(relative_name)
+    if (
+        relative.is_absolute()
+        or ".." in relative.parts
+        or not relative.parts
+        or relative.parts[0] != "prompts"
+        or relative.suffix != ".json"
+    ):
+        fail("manifest.generator.promptCatalog must be a safe prompts/*.json path")
+    path = (BENCHMARK_ROOT / relative).resolve()
+    try:
+        path.relative_to(BENCHMARK_ROOT.resolve())
+    except ValueError:
+        fail("manifest.generator.promptCatalog escapes the benchmark directory")
+    declared_hash = require_string(
+        generator.get("promptCatalogSha256"),
+        "manifest.generator.promptCatalogSha256",
+    )
+    if not SHA256_PATTERN.fullmatch(declared_hash):
+        fail("manifest.generator.promptCatalogSha256 must be lowercase SHA-256")
+    if not path.is_file() or digest(path) != declared_hash:
+        fail("the canonical prompt catalog is missing or its SHA-256 changed")
+    try:
+        catalog = require_mapping(json.loads(path.read_text("utf-8")), "promptCatalog")
+    except (OSError, json.JSONDecodeError) as error:
+        fail(f"cannot parse the canonical prompt catalog: {error}")
+    if catalog.get("schemaVersion") != 1:
+        fail("promptCatalog.schemaVersion must be 1")
+    require_string(catalog.get("assembly"), "promptCatalog.assembly")
+    require_string(catalog.get("sharedPrompt"), "promptCatalog.sharedPrompt")
+    prompts = require_list(catalog.get("prompts"), "promptCatalog.prompts")
+    prompt_ids: set[str] = set()
+    for index, entry in enumerate(prompts):
+        location = f"promptCatalog.prompts[{index}]"
+        item = require_mapping(entry, location)
+        prompt_id = require_string(item.get("id"), f"{location}.id")
+        require_string(item.get("screenPrompt"), f"{location}.screenPrompt")
+        if prompt_id in prompt_ids:
+            fail(f"duplicate canonical prompt id: {prompt_id}")
+        prompt_ids.add(prompt_id)
+    if len(prompt_ids) < 12:
+        fail("the prompt catalog must cover three directions and ten screens")
+    return prompt_ids
+
+
 def manifest_entries(manifest: dict[str, Any]) -> dict[str, str]:
     if manifest.get("schemaVersion") != 1:
         fail("manifest.schemaVersion must be 1")
     require_string(manifest.get("benchmarkVersion"), "manifest.benchmarkVersion")
     require_string(manifest.get("product"), "manifest.product")
+    prompt_ids = prompt_catalog(manifest)
+
+    figma = require_mapping(manifest.get("figmaMirror"), "manifest.figmaMirror")
+    require_string(figma.get("fileKey"), "manifest.figmaMirror.fileKey")
+    require_string(figma.get("url"), "manifest.figmaMirror.url")
+    require_string(figma.get("status"), "manifest.figmaMirror.status")
+    if figma.get("canonicalSource") != "repository":
+        fail("the repository must remain the visual benchmark release source")
+    required_modes = figma.get("requiredThemeModes")
+    available_modes = figma.get("availableThemeModes")
+    if (
+        isinstance(required_modes, bool)
+        or not isinstance(required_modes, int)
+        or required_modes < 2
+        or isinstance(available_modes, bool)
+        or not isinstance(available_modes, int)
+        or available_modes < 1
+    ):
+        fail("Figma mode capabilities must be recorded as positive integers")
 
     selection = require_mapping(manifest.get("selection"), "manifest.selection")
     candidates = require_list(
@@ -121,9 +192,14 @@ def manifest_entries(manifest: dict[str, Any]) -> dict[str, str]:
 
     registered: dict[str, str] = {}
     selected: list[dict[str, Any]] = []
+    used_prompt_ids: set[str] = set()
     for index, entry in enumerate(candidates):
         location = f"manifest.selection.candidates[{index}]"
         item = register_entry(entry, location, registered)
+        prompt_id = require_string(item.get("promptId"), f"{location}.promptId")
+        if prompt_id not in prompt_ids:
+            fail(f"{location}.promptId is absent from the canonical prompt catalog")
+        used_prompt_ids.add(prompt_id)
         score = item.get("score")
         if isinstance(score, bool) or not isinstance(score, (int, float)):
             fail(f"{location}.score must be numeric")
@@ -150,7 +226,10 @@ def manifest_entries(manifest: dict[str, Any]) -> dict[str, str]:
         screen_ids.add(screen_id)
         if item.get("status") != "approved":
             fail(f"{location}.status must be approved")
-        require_string(item.get("promptId"), f"{location}.promptId")
+        prompt_id = require_string(item.get("promptId"), f"{location}.promptId")
+        if prompt_id not in prompt_ids:
+            fail(f"{location}.promptId is absent from the canonical prompt catalog")
+        used_prompt_ids.add(prompt_id)
         pixel_size = require_list(item.get("pixelSize"), f"{location}.pixelSize")
         if (
             len(pixel_size) != 2
@@ -175,6 +254,13 @@ def manifest_entries(manifest: dict[str, Any]) -> dict[str, str]:
             if screen_id in evidence_ids:
                 fail(f"duplicate implementation evidence for screenId: {screen_id}")
             evidence_ids.add(screen_id)
+
+    if used_prompt_ids != prompt_ids:
+        fail(
+            "canonical prompt usage differs from the registered benchmark set "
+            f"(unused={sorted(prompt_ids - used_prompt_ids)}, "
+            f"unknown={sorted(used_prompt_ids - prompt_ids)})"
+        )
 
     return registered
 

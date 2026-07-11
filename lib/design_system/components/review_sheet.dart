@@ -1,15 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:lizzieyzy_mobile/l10n/l10n.dart';
 
 import '../tokens.dart';
 
 enum ReviewSection { keyMoves, variations, trend, game }
 
 extension ReviewSectionLabel on ReviewSection {
-  String get label => switch (this) {
-    ReviewSection.keyMoves => '关键手',
-    ReviewSection.variations => '变化',
-    ReviewSection.trend => '走势',
-    ReviewSection.game => '本局',
+  String localizedLabel(AppLocalizations l10n) => switch (this) {
+    ReviewSection.keyMoves => l10n.reviewKeyMoves,
+    ReviewSection.variations => l10n.reviewVariations,
+    ReviewSection.trend => l10n.reviewTrend,
+    ReviewSection.game => l10n.reviewGame,
   };
 }
 
@@ -38,6 +39,7 @@ class ReviewSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = context.l10n;
     return Material(
       color: theme.colorScheme.surface,
       elevation: 0,
@@ -57,7 +59,7 @@ class ReviewSheet extends StatelessWidget {
             if (showHandle)
               Center(
                 child: Semantics(
-                  label: '复盘面板',
+                  label: l10n.reviewPanel,
                   child: Container(
                     width: 36,
                     height: 4,
@@ -79,7 +81,7 @@ class ReviewSheet extends StatelessWidget {
                 children: <Widget>[
                   for (final section in ReviewSection.values)
                     _ReviewTab(
-                      label: section.label,
+                      label: section.localizedLabel(l10n),
                       selected: selectedSection == section,
                       onTap: onSectionChanged == null
                           ? null
@@ -117,7 +119,7 @@ class _ReviewTab extends StatelessWidget {
     return Semantics(
       button: true,
       selected: selected,
-      label: '$label标签页',
+      label: context.l10n.tabSemantics(label),
       excludeSemantics: true,
       child: InkWell(
         onTap: onTap,

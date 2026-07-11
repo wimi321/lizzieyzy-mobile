@@ -136,16 +136,19 @@ abstract final class ReviewInputValidator {
       }
       if (index == 0 &&
           (node.playedMovePointLoss != null ||
-              node.playedMoveWinRateLoss != null)) {
+              node.playedMoveWinRateLoss != null ||
+              node.playedMovePolicy != null ||
+              node.playedMoveHumanPolicy != null)) {
         throw const ReviewInputException(
           ReviewInputErrorCode.incompleteAnalysis,
-          'Root analysis cannot contain played-move loss.',
+          'Root analysis cannot contain played-move evidence.',
         );
       }
-      if (index > 0 && node.playedMovePointLoss == null) {
+      if (index > 0 &&
+          (node.playedMovePointLoss == null || node.playedMovePolicy == null)) {
         throw ReviewInputException(
           ReviewInputErrorCode.incompleteAnalysis,
-          'Point loss is missing at move $index.',
+          'Point loss or full-policy evidence is missing at move $index.',
         );
       }
       if (index < record.moves.length && node.candidates.isEmpty) {
@@ -157,6 +160,8 @@ abstract final class ReviewInputValidator {
       _validateCandidates(
         node,
         record.boardSize,
+        position: record.validation.positions[index],
+        rules: record.rules,
         maximumCandidates: analysis.settings.maxCandidates,
       );
 
@@ -188,6 +193,8 @@ abstract final class ReviewInputValidator {
   static void _validateCandidates(
     MoveAnalysis node,
     BoardSize boardSize, {
+    required BoardPosition position,
+    required GoRules rules,
     required int maximumCandidates,
   }) {
     if (node.candidates.length > maximumCandidates) {
@@ -229,6 +236,43 @@ abstract final class ReviewInputValidator {
         throw ReviewInputException(
           ReviewInputErrorCode.invalidCandidates,
           'Candidates at move ${node.moveNumber} are not ordered by visits.',
+        );
+      }
+      final pv = candidate.principalVariation;
+      if (pv.isNotEmpty) {
+        if (pv.length > 64) {
+          throw ReviewInputException(
+            ReviewInputErrorCode.invalidCandidates,
+            'Candidate PV at move ${node.moveNumber} exceeds 64 moves.',
+          );
+        }
+        if (pv.first != candidate.move) {
+          throw ReviewInputException(
+            ReviewInputErrorCode.invalidCandidates,
+            'Candidate PV at move ${node.moveNumber} does not begin with its candidate.',
+          );
+        }
+        var expected = node.toPlay;
+        for (final move in pv) {
+          if (move.color != expected) {
+            throw ReviewInputException(
+              ReviewInputErrorCode.invalidCandidates,
+              'Candidate PV at move ${node.moveNumber} has an invalid turn order.',
+            );
+          }
+          expected = expected.opponent;
+        }
+      }
+      final replay = GoRuleValidator.validate(
+        initialPosition: position,
+        moves: pv.isEmpty ? <Move>[candidate.move] : pv,
+        rules: rules,
+        firstPlayer: node.toPlay,
+      );
+      if (!replay.isValid) {
+        throw ReviewInputException(
+          ReviewInputErrorCode.invalidCandidates,
+          'Candidate or PV at move ${node.moveNumber} is illegal.',
         );
       }
       previousVisits = candidate.visits;

@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:lizzieyzy_mobile/l10n/l10n.dart';
 
 import '../tokens.dart';
 
@@ -19,26 +20,34 @@ class ScoreChart extends StatelessWidget {
     super.key,
     this.currentMove,
     this.height = 156,
-    this.semanticLabel = '目差走势',
+    this.semanticLabel,
   });
 
   final List<ScoreSample> samples;
   final int? currentMove;
   final double height;
-  final String semanticLabel;
+  final String? semanticLabel;
 
   @override
   Widget build(BuildContext context) {
-    final latest = samples.isEmpty ? null : samples.last.scoreLead;
-    final direction = latest == null
-        ? '暂无数据'
-        : latest >= 0
-        ? '黑方领先 ${latest.abs().toStringAsFixed(1)} 目'
-        : '白方领先 ${latest.abs().toStringAsFixed(1)} 目';
+    final l10n = context.l10n;
+    final resolvedLabel = semanticLabel ?? l10n.scoreTrend;
+    final selectedSample = _semanticSample;
+    final scoreLead = selectedSample?.scoreLead;
+    final direction = scoreLead == null
+        ? l10n.noData
+        : scoreLead >= 0
+        ? l10n.blackLeads(scoreLead.abs().toStringAsFixed(1))
+        : l10n.whiteLeads(scoreLead.abs().toStringAsFixed(1));
     return Semantics(
       image: true,
-      label:
-          '$semanticLabel，$direction${currentMove == null ? '' : '，当前第 $currentMove 手'}',
+      label: currentMove == null
+          ? l10n.scoreChartSemantics(resolvedLabel, direction)
+          : l10n.scoreChartMoveSemantics(
+              resolvedLabel,
+              direction,
+              currentMove!,
+            ),
       excludeSemantics: true,
       child: SizedBox(
         height: height,
@@ -59,6 +68,24 @@ class ScoreChart extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  ScoreSample? get _semanticSample {
+    if (samples.isEmpty) return null;
+    final target = currentMove;
+    if (target == null) {
+      return samples.reduce(
+        (left, right) => left.move >= right.move ? left : right,
+      );
+    }
+    return samples.reduce((left, right) {
+      final leftDistance = (left.move - target).abs();
+      final rightDistance = (right.move - target).abs();
+      if (leftDistance != rightDistance) {
+        return leftDistance < rightDistance ? left : right;
+      }
+      return left.move <= right.move ? left : right;
+    });
   }
 }
 

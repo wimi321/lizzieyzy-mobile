@@ -1,14 +1,17 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:lizzieyzy_mobile/design_system/design_system.dart';
+import 'package:lizzieyzy_mobile/domain/domain.dart' as domain;
+import 'package:lizzieyzy_mobile/l10n/l10n.dart';
 
 import '../../common/presentation/feature_chrome.dart';
-import '../../fixtures/ui_fixtures.dart';
+import 'review_screen_data.dart';
 
 class VariationComparisonScreen extends StatefulWidget {
-  const VariationComparisonScreen({super.key});
+  const VariationComparisonScreen({super.key, this.selection});
+
+  final ReviewMoveSelection? selection;
 
   @override
   State<VariationComparisonScreen> createState() =>
@@ -20,351 +23,142 @@ class _VariationComparisonScreenState extends State<VariationComparisonScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.light,
-      child: Theme(
-        data: LizzieTheme.dark(),
-        child: Builder(
-          builder: (context) {
-            final model = UiFixtures.keyMove;
-            return Scaffold(
-              body: Column(
-                children: <Widget>[
-                  FeatureTopBar(
-                    title: '变化比较',
-                    subtitle: '第87手 · 白方选择',
-                    leading: const BackCircleButton(),
-                    actions: <Widget>[
-                      IconButton(
-                        tooltip: '更多数据',
-                        onPressed: () {},
-                        icon: const Icon(Icons.more_horiz_rounded),
-                      ),
-                    ],
-                    dark: true,
-                  ),
-                  Expanded(
-                    child: SafeArea(
-                      top: false,
-                      key: const Key('variation-comparison-scroll'),
-                      child: LayoutBuilder(
-                        builder: (context, constraints) {
-                          const horizontalPadding = GoSpacing.s3;
-                          final textScale = MediaQuery.textScalerOf(
-                            context,
-                          ).scale(1);
-                          final largeText = textScale > 1.45;
-                          final reservedHeight = largeText
-                              ? 445.0
-                              : 350 + math.max<double>(0, textScale - 1) * 100;
-                          final boardSide = math.min<double>(
-                            constraints.maxWidth - horizontalPadding * 2,
-                            math.max<double>(
-                              largeText ? 196 : 200,
-                              constraints.maxHeight - reservedHeight,
+    final l10n = context.l10n;
+    final selection = widget.selection;
+    if (selection == null) return const _VariationUnavailable();
+    final data = selection.data;
+    final moveNumber = selection.moveNumber.clamp(1, data.totalMoves);
+    final before = data.beforeMove(moveNumber);
+    final candidates = before.candidates.take(3).toList(growable: false);
+    if (_selected >= candidates.length) _selected = 0;
+    final candidate = candidates.isEmpty ? null : candidates[_selected];
+    final largeText = MediaQuery.textScalerOf(context).scale(1) >= 1.6;
+    final extraLarge = MediaQuery.textScalerOf(context).scale(1) >= 2.5;
+    final variationStones = candidate == null
+        ? data.stonesBeforeMove(moveNumber)
+        : _variationStones(data, moveNumber, candidate);
+    return Scaffold(
+      body: Column(
+        children: <Widget>[
+          FeatureTopBar(
+            title: l10n.variationComparisonTitle,
+            subtitle: l10n.variationComparisonSubtitle(moveNumber),
+            leading: const BackCircleButton(),
+          ),
+          Expanded(
+            child: SafeArea(
+              top: false,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final reserved = extraLarge
+                      ? 360.0
+                      : largeText
+                      ? 340.0
+                      : 350.0;
+                  final maximumBoardWidth =
+                      constraints.maxWidth *
+                      (extraLarge
+                          ? 0.64
+                          : largeText
+                          ? 0.78
+                          : 1);
+                  final boardSide = math.min<double>(
+                    maximumBoardWidth - GoSpacing.s6,
+                    math.max<double>(128, constraints.maxHeight - reserved),
+                  );
+                  return Padding(
+                    key: const Key('variation-comparison-viewport'),
+                    padding: const EdgeInsets.fromLTRB(
+                      GoSpacing.s3,
+                      GoSpacing.s1,
+                      GoSpacing.s3,
+                      GoSpacing.s2,
+                    ),
+                    child: Column(
+                      children: <Widget>[
+                        SizedBox.square(
+                          dimension: boardSide,
+                          child: GoBoard(
+                            boardSize: data.record.boardSize.dimension,
+                            stones: variationStones,
+                            candidates: data.candidatesBeforeMove(
+                              moveNumber,
+                              l10n,
                             ),
-                          );
-                          final coordinate = switch (_selected) {
-                            0 => 'R14',
-                            1 => 'Q14',
-                            _ => 'O16',
-                          };
-                          return Padding(
-                            padding: const EdgeInsets.fromLTRB(
-                              horizontalPadding,
-                              GoSpacing.s1,
-                              horizontalPadding,
-                              GoSpacing.s1,
+                            selectedPoint:
+                                candidate == null || candidate.move.isPass
+                                ? null
+                                : uiPoint(candidate.move.point!),
+                            showCoordinates: true,
+                            semanticLabel: l10n.variationBoardSemantics(
+                              moveNumber,
+                              String.fromCharCode(65 + _selected),
                             ),
-                            child: Column(
-                              children: <Widget>[
-                                SizedBox.square(
-                                  dimension: boardSide,
-                                  child: GoBoard(
-                                    stones: model.stones,
-                                    candidates: model.candidates,
-                                    lastMove: const BoardPoint(15, 3),
-                                    selectedPoint:
-                                        model.candidates[_selected].point,
-                                    semanticLabel:
-                                        '第87手变化比较，当前选择候选${String.fromCharCode(65 + _selected)}',
-                                    showCoordinates: true,
+                          ),
+                        ),
+                        const SizedBox(height: GoSpacing.s1),
+                        if (candidates.isNotEmpty)
+                          _VariationSelector(
+                            candidates: candidates,
+                            boardSize: data.record.boardSize,
+                            selected: _selected,
+                            compact: largeText,
+                            onSelected: (index) =>
+                                setState(() => _selected = index),
+                          ),
+                        const SizedBox(height: GoSpacing.s1),
+                        Expanded(
+                          child: candidate == null
+                              ? SurfacePanel(
+                                  child: Center(
+                                    child: Text(l10n.noComparableCandidate),
                                   ),
+                                )
+                              : _VariationDetails(
+                                  data: data,
+                                  moveNumber: moveNumber,
+                                  candidate: candidate,
+                                  label: String.fromCharCode(65 + _selected),
+                                  compact: largeText,
+                                  extraCompact: extraLarge,
                                 ),
-                                const SizedBox(height: GoSpacing.s2),
-                                Row(
-                                  children: <Widget>[
-                                    for (
-                                      var index = 0;
-                                      index < model.candidates.length;
-                                      index++
-                                    )
-                                      Expanded(
-                                        child: Padding(
-                                          padding: EdgeInsets.only(
-                                            right:
-                                                index ==
-                                                    model.candidates.length - 1
-                                                ? 0
-                                                : GoSpacing.s2,
-                                          ),
-                                          child: _VariationChoice(
-                                            label: String.fromCharCode(
-                                              65 + index,
-                                            ),
-                                            coordinate: switch (index) {
-                                              0 => 'R14',
-                                              1 => 'Q14',
-                                              _ => 'O16',
-                                            },
-                                            detail:
-                                                model
-                                                    .candidates[index]
-                                                    .detail ??
-                                                '',
-                                            largeText: largeText,
-                                            selected: _selected == index,
-                                            onTap: () => setState(
-                                              () => _selected = index,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                                const SizedBox(height: GoSpacing.s2),
-                                _VariationInspector(
-                                  coordinate: coordinate,
-                                  detail:
-                                      model.candidates[_selected].detail ?? '',
-                                  best: _selected == 0,
-                                  largeText: largeText,
-                                ),
-                                if (!largeText) ...<Widget>[
-                                  const SizedBox(height: GoSpacing.s2),
-                                  const _PlayedCandidateComparison(),
-                                ],
-                                const SizedBox(height: GoSpacing.s2),
-                                SizedBox(
-                                  width: double.infinity,
-                                  height: GoSizes.minimumTouchTarget,
-                                  child: FilledButton.icon(
+                        ),
+                        const SizedBox(height: GoSpacing.s1),
+                        SizedBox(
+                          width: double.infinity,
+                          child: extraLarge
+                              ? Semantics(
+                                  button: true,
+                                  label: l10n.returnToMainLine(moveNumber),
+                                  excludeSemantics: true,
+                                  child: FilledButton(
                                     onPressed: () =>
                                         Navigator.maybePop(context),
-                                    icon: const Icon(Icons.fork_right_rounded),
-                                    label: const Text('回到主线第87手'),
+                                    child: Text(
+                                      l10n.returnToMainLine(moveNumber),
+                                      maxLines: 2,
+                                      textAlign: TextAlign.center,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .labelSmall
+                                          ?.copyWith(height: 1),
+                                    ),
+                                  ),
+                                )
+                              : FilledButton.icon(
+                                  onPressed: () => Navigator.maybePop(context),
+                                  icon: const Icon(Icons.fork_right_rounded),
+                                  label: Text(
+                                    l10n.returnToMainLine(moveNumber),
                                   ),
                                 ),
-                              ],
-                            ),
-                          );
-                        },
-                      ),
+                        ),
+                      ],
                     ),
-                  ),
-                ],
-              ),
-            );
-          },
-        ),
-      ),
-    );
-  }
-}
-
-class _VariationChoice extends StatelessWidget {
-  const _VariationChoice({
-    required this.label,
-    required this.coordinate,
-    required this.detail,
-    required this.selected,
-    required this.largeText,
-    required this.onTap,
-  });
-
-  final String label;
-  final String coordinate;
-  final String detail;
-  final bool selected;
-  final bool largeText;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Semantics(
-      button: true,
-      selected: selected,
-      label: '候选$label，$coordinate，$detail',
-      child: Material(
-        color: selected
-            ? theme.colorScheme.primaryContainer
-            : theme.colorScheme.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(GoRadii.card),
-          side: BorderSide(
-            color: selected
-                ? theme.colorScheme.primary
-                : context.goColors.softDivider,
-          ),
-        ),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(GoRadii.card),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(
-              minHeight: GoSizes.minimumTouchTarget,
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: GoSpacing.s2),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: <Widget>[
-                  CandidateMarker(
-                    label: label,
-                    selected: selected,
-                    diameter: 24,
-                  ),
-                  const SizedBox(width: GoSpacing.s1),
-                  Flexible(
-                    child: largeText
-                        ? Text(
-                            coordinate,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.labelLarge,
-                          )
-                        : Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: <Widget>[
-                              Text(
-                                coordinate,
-                                style: theme.textTheme.labelLarge,
-                              ),
-                              Text(
-                                detail,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: theme.textTheme.bodySmall,
-                              ),
-                            ],
-                          ),
-                  ),
-                ],
+                  );
+                },
               ),
             ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _VariationInspector extends StatelessWidget {
-  const _VariationInspector({
-    required this.coordinate,
-    required this.detail,
-    required this.best,
-    required this.largeText,
-  });
-
-  final String coordinate;
-  final String detail;
-  final bool best;
-  final bool largeText;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    if (largeText) {
-      return Semantics(
-        container: true,
-        label:
-            '候选$coordinate，$detail，胜率57.8%，目差加3.1目，12840访问，主变化白R14黑R15白Q13黑P14白S13，实战Q16负2.1目',
-        excludeSemantics: true,
-        child: SurfacePanel(
-          padding: const EdgeInsets.symmetric(
-            horizontal: GoSpacing.s2,
-            vertical: GoSpacing.s1,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              Row(
-                children: <Widget>[
-                  Expanded(
-                    child: Text(
-                      '$coordinate · $detail',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.titleLarge,
-                    ),
-                  ),
-                  if (best)
-                    const MetricPill(
-                      label: '最佳',
-                      tone: MetricTone.primary,
-                      compact: true,
-                    ),
-                ],
-              ),
-              Text(
-                '57.8% · +3.1目 · 12,840访问',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall,
-              ),
-              Text(
-                'PV R14 → R15 → Q13 · 实战 Q16 -2.1目',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall,
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-    return SurfacePanel(
-      padding: const EdgeInsets.all(GoSpacing.s2),
-      child: Column(
-        children: <Widget>[
-          Row(
-            children: <Widget>[
-              Text(coordinate, style: theme.textTheme.titleLarge),
-              const SizedBox(width: GoSpacing.s2),
-              if (best)
-                const MetricPill(
-                  label: '最佳候选',
-                  tone: MetricTone.primary,
-                  compact: true,
-                ),
-              const Spacer(),
-              Text(detail, style: theme.textTheme.labelLarge),
-            ],
-          ),
-          const SizedBox(height: GoSpacing.s1),
-          const Row(
-            children: <Widget>[
-              Expanded(
-                child: _InspectorMetric(label: '胜率', value: '57.8%'),
-              ),
-              Expanded(
-                child: _InspectorMetric(label: '目差', value: '+3.1目'),
-              ),
-              Expanded(
-                child: _InspectorMetric(label: '访问', value: '12,840'),
-              ),
-            ],
-          ),
-          const SizedBox(height: GoSpacing.s1),
-          const Row(
-            children: <Widget>[
-              Text('主变化'),
-              SizedBox(width: GoSpacing.s2),
-              Expanded(child: _PrincipalVariation()),
-            ],
           ),
         ],
       ),
@@ -372,128 +166,400 @@ class _VariationInspector extends StatelessWidget {
   }
 }
 
-class _InspectorMetric extends StatelessWidget {
-  const _InspectorMetric({required this.label, required this.value});
+class _VariationSelector extends StatelessWidget {
+  const _VariationSelector({
+    required this.candidates,
+    required this.boardSize,
+    required this.selected,
+    required this.compact,
+    required this.onSelected,
+  });
 
+  final List<domain.Candidate> candidates;
+  final domain.BoardSize boardSize;
+  final int selected;
+  final bool compact;
+  final ValueChanged<int> onSelected;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: <Widget>[
+      for (var index = 0; index < candidates.length; index++)
+        Expanded(
+          child: Padding(
+            padding: EdgeInsets.only(
+              right: index == candidates.length - 1 ? 0 : GoSpacing.s2,
+            ),
+            child: Semantics(
+              button: true,
+              selected: selected == index,
+              label: context.l10n.candidateChoiceSemantics(
+                String.fromCharCode(65 + index),
+                formatMove(candidates[index].move, boardSize, context.l10n),
+                formatScore(candidates[index].scoreLead, context.l10n),
+              ),
+              excludeSemantics: true,
+              child: ChoiceChip(
+                selected: selected == index,
+                showCheckmark: false,
+                onSelected: (_) => onSelected(index),
+                label: SizedBox(
+                  width: double.infinity,
+                  child: Text(
+                    compact
+                        ? String.fromCharCode(65 + index)
+                        : '${String.fromCharCode(65 + index)} · '
+                              '${formatMove(candidates[index].move, boardSize, context.l10n)}',
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+    ],
+  );
+}
+
+class _VariationDetails extends StatelessWidget {
+  const _VariationDetails({
+    required this.data,
+    required this.moveNumber,
+    required this.candidate,
+    required this.label,
+    required this.compact,
+    required this.extraCompact,
+  });
+
+  final ReviewScreenData data;
+  final int moveNumber;
+  final domain.Candidate candidate;
   final String label;
-  final String value;
+  final bool compact;
+  final bool extraCompact;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Column(
-      mainAxisSize: MainAxisSize.min,
+    final l10n = context.l10n;
+    final played = data.record.moves[moveNumber - 1];
+    final after = data.afterMove(moveNumber);
+    final displayedPv = candidate.principalVariation
+        .take(extraCompact ? 3 : 5)
+        .toList(growable: false);
+    final pv = displayedPv
+        .map((move) => formatMove(move, data.record.boardSize, l10n))
+        .join('  ');
+    return Semantics(
+      container: true,
+      label: l10n.variationDetailsSemantics(
+        label,
+        formatMove(candidate.move, data.record.boardSize, l10n),
+        formatPercent(candidate.winRate),
+        formatScore(candidate.scoreLead, l10n),
+        l10n.visitsValue(formatVisits(candidate.visits)),
+        pv,
+        formatMove(played, data.record.boardSize, l10n),
+        formatPointLoss(after.playedMovePointLoss, l10n),
+      ),
+      excludeSemantics: true,
+      child: SurfacePanel(
+        padding: const EdgeInsets.all(GoSpacing.s2),
+        child: extraCompact
+            ? Center(
+                child: Wrap(
+                  alignment: WrapAlignment.center,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: GoSpacing.s1,
+                  runSpacing: 2,
+                  children: <Widget>[
+                    Text(
+                      '$label · '
+                      '${formatMove(candidate.move, data.record.boardSize, l10n)}',
+                      key: const Key('variation-primary-metrics'),
+                      textAlign: TextAlign.center,
+                      style: Theme.of(
+                        context,
+                      ).textTheme.labelSmall?.copyWith(height: 1),
+                    ),
+                    Text(
+                      '${formatPercent(candidate.winRate)} · '
+                      '${formatScore(candidate.scoreLead, l10n)} · '
+                      '#${formatVisits(candidate.visits)}',
+                      key: const Key('variation-secondary-metrics'),
+                      textAlign: TextAlign.center,
+                      style: Theme.of(
+                        context,
+                      ).textTheme.labelSmall?.copyWith(height: 1),
+                    ),
+                    Text(
+                      pv.isEmpty ? l10n.principalVariationNone : 'PV  $pv',
+                      key: const Key('variation-pv'),
+                      textAlign: TextAlign.center,
+                      style: Theme.of(
+                        context,
+                      ).textTheme.labelSmall?.copyWith(height: 1),
+                    ),
+                    Text(
+                      '${formatMove(played, data.record.boardSize, l10n)} · '
+                      '${formatPointLoss(after.playedMovePointLoss, l10n)}',
+                      key: const Key('variation-played-loss'),
+                      textAlign: TextAlign.center,
+                      style: Theme.of(
+                        context,
+                      ).textTheme.labelSmall?.copyWith(height: 1),
+                    ),
+                  ],
+                ),
+              )
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  Row(
+                    children: <Widget>[
+                      CandidateMarker(label: label, selected: true),
+                      const SizedBox(width: GoSpacing.s2),
+                      Expanded(
+                        child: Text(
+                          formatMove(
+                            candidate.move,
+                            data.record.boardSize,
+                            l10n,
+                          ),
+                          maxLines: 1,
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                      ),
+                      MetricPill(
+                        label: _selectedLabel(
+                          candidate,
+                          data,
+                          moveNumber,
+                          l10n,
+                        ),
+                        compact: true,
+                        tone: MetricTone.primary,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: GoSpacing.s1),
+                  if (compact) ...<Widget>[
+                    Text(
+                      l10n.candidateMetricDetail(
+                        formatPercent(candidate.winRate),
+                        formatScore(candidate.scoreLead, l10n),
+                        l10n.visitsValue(formatVisits(candidate.visits)),
+                      ),
+                      key: const Key('variation-primary-metrics'),
+                      maxLines: 2,
+                    ),
+                    const Spacer(),
+                    Text(
+                      pv.isEmpty ? l10n.principalVariationNone : 'PV  $pv',
+                      key: const Key('variation-pv'),
+                      maxLines: 2,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    const SizedBox(height: GoSpacing.s1),
+                    Text(
+                      l10n.playedMoveWithLoss(
+                        formatMove(played, data.record.boardSize, l10n),
+                        formatPointLoss(after.playedMovePointLoss, l10n),
+                      ),
+                      key: const Key('variation-played-loss'),
+                      maxLines: 2,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ] else ...<Widget>[
+                    const SizedBox(height: GoSpacing.s1),
+                    Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: LabeledValue(
+                            label: l10n.winRateLabel,
+                            value: formatPercent(candidate.winRate),
+                          ),
+                        ),
+                        Expanded(
+                          child: LabeledValue(
+                            label: l10n.scoreLeadLabel,
+                            value: formatScore(candidate.scoreLead, l10n),
+                            alignEnd: true,
+                          ),
+                        ),
+                        Expanded(
+                          child: LabeledValue(
+                            label: l10n.visitsLabel,
+                            value: formatVisits(candidate.visits),
+                            alignEnd: true,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const Spacer(),
+                    _PrincipalVariationStrip(
+                      moves: displayedPv,
+                      boardSize: data.record.boardSize,
+                    ),
+                    const Spacer(),
+                    Divider(height: 1, color: context.goColors.softDivider),
+                    const SizedBox(height: GoSpacing.s1),
+                    Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: Text(
+                            l10n.playedMoveValue(
+                              formatMove(played, data.record.boardSize, l10n),
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ),
+                        Text(
+                          formatPointLoss(after.playedMovePointLoss, l10n),
+                          style: Theme.of(context).textTheme.labelLarge
+                              ?.copyWith(
+                                color: Theme.of(context).colorScheme.error,
+                              ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+class _PrincipalVariationStrip extends StatelessWidget {
+  const _PrincipalVariationStrip({
+    required this.moves,
+    required this.boardSize,
+  });
+
+  final List<domain.Move> moves;
+  final domain.BoardSize boardSize;
+
+  @override
+  Widget build(BuildContext context) {
+    if (moves.isEmpty) {
+      return Text(
+        context.l10n.serviceNoPrincipalVariation,
+        textAlign: TextAlign.center,
+        style: Theme.of(context).textTheme.bodySmall,
+      );
+    }
+    return Row(
       children: <Widget>[
-        Text(label, style: theme.textTheme.bodySmall),
-        Text(value, style: theme.textTheme.labelMedium),
+        for (var index = 0; index < moves.length; index++)
+          Expanded(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Container(
+                  width: 28,
+                  height: 28,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: moves[index].color == domain.StoneColor.black
+                        ? Theme.of(context).colorScheme.onSurface
+                        : Theme.of(context).colorScheme.surface,
+                    border: Border.all(
+                      color: Theme.of(context).colorScheme.outline,
+                    ),
+                  ),
+                  child: Text(
+                    '${index + 1}',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: moves[index].color == domain.StoneColor.black
+                          ? Theme.of(context).colorScheme.surface
+                          : Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: GoSpacing.s1),
+                Text(
+                  formatMove(moves[index], boardSize, context.l10n),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelSmall,
+                ),
+              ],
+            ),
+          ),
       ],
     );
   }
 }
 
-class _PlayedCandidateComparison extends StatelessWidget {
-  const _PlayedCandidateComparison();
+class _VariationUnavailable extends StatelessWidget {
+  const _VariationUnavailable();
 
   @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return SurfacePanel(
-      padding: const EdgeInsets.symmetric(
-        horizontal: GoSpacing.s3,
-        vertical: GoSpacing.s2,
-      ),
-      child: Row(
-        children: <Widget>[
-          const Expanded(
-            child: LabeledValue(label: '实战 Q16', value: '-2.1目'),
-          ),
-          Icon(
-            Icons.compare_arrows_rounded,
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-          const Expanded(
-            child: LabeledValue(
-              label: '候选 R14',
-              value: '+3.1目',
-              alignEnd: true,
+  Widget build(BuildContext context) => Scaffold(
+    body: Column(
+      children: <Widget>[
+        FeatureTopBar(
+          title: context.l10n.variationComparisonTitle,
+          subtitle: context.l10n.realCandidateData,
+          leading: const BackCircleButton(),
+        ),
+        Expanded(
+          child: Center(
+            child: FilledButton(
+              onPressed: () => Navigator.maybePop(context),
+              child: Text(context.l10n.noVariationReturn),
             ),
           ),
-        ],
-      ),
-    );
-  }
+        ),
+      ],
+    ),
+  );
 }
 
-class _PrincipalVariation extends StatelessWidget {
-  const _PrincipalVariation();
-
-  @override
-  Widget build(BuildContext context) {
-    const moves = <(String, StoneColor)>[
-      ('R14', StoneColor.white),
-      ('R15', StoneColor.black),
-      ('Q13', StoneColor.white),
-      ('P14', StoneColor.black),
-      ('S13', StoneColor.white),
-    ];
-    return Semantics(
-      label: '主变化，白R14，黑R15，白Q13，黑P14，白S13',
-      child: Wrap(
-        spacing: GoSpacing.s1,
-        runSpacing: GoSpacing.s1,
-        children: <Widget>[
-          for (var index = 0; index < moves.length; index++)
-            _MoveToken(
-              number: index + 1,
-              coordinate: moves[index].$1,
-              color: moves[index].$2,
-            ),
-        ],
-      ),
-    );
+List<BoardStone> _variationStones(
+  ReviewScreenData data,
+  int moveNumber,
+  domain.Candidate candidate,
+) {
+  final initial = data.positionBeforeMove(moveNumber);
+  final pv = candidate.principalVariation;
+  if (pv.isEmpty) return boardStones(initial);
+  final validation = domain.GoRuleValidator.validate(
+    initialPosition: initial,
+    moves: pv,
+    rules: data.record.rules,
+    firstPlayer: candidate.move.color,
+  );
+  if (!validation.isValid) return boardStones(initial);
+  final finalPosition = validation.finalPosition;
+  final numbers = <domain.BoardPoint, int>{};
+  for (var index = 0; index < pv.length; index++) {
+    final point = pv[index].point;
+    if (point != null && finalPosition.stoneAt(point) == pv[index].color) {
+      numbers[point] = index + 1;
+    }
   }
+  return <BoardStone>[
+    for (final entry in finalPosition.stones.entries)
+      BoardStone(
+        point: uiPoint(entry.key),
+        color: entry.value == domain.StoneColor.black
+            ? StoneColor.black
+            : StoneColor.white,
+        moveNumber: numbers[entry.key],
+      ),
+  ];
 }
 
-class _MoveToken extends StatelessWidget {
-  const _MoveToken({
-    required this.number,
-    required this.coordinate,
-    required this.color,
-  });
-
-  final int number;
-  final String coordinate;
-  final StoneColor color;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.goColors;
-    final black = color == StoneColor.black;
-    return SizedBox(
-      width: 36,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Container(
-            width: 26,
-            height: 26,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: black ? colors.blackStone : colors.whiteStone,
-              shape: BoxShape.circle,
-              border: Border.all(color: colors.whiteStoneOutline),
-            ),
-            child: Text(
-              '$number',
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: black ? colors.whiteStone : colors.blackStone,
-              ),
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(coordinate, style: Theme.of(context).textTheme.labelSmall),
-        ],
-      ),
-    );
-  }
-}
+String _selectedLabel(
+  domain.Candidate candidate,
+  ReviewScreenData data,
+  int moveNumber,
+  AppLocalizations l10n,
+) => candidate == data.beforeMove(moveNumber).candidates.first
+    ? l10n.bestCandidate
+    : l10n.candidateVariation;

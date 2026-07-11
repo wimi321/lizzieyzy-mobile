@@ -1,5 +1,3 @@
-import '../../domain/domain.dart';
-
 sealed class KataGoAnalysisException implements Exception {
   const KataGoAnalysisException(this.message, {this.requestId, this.field});
 
@@ -18,36 +16,35 @@ sealed class KataGoAnalysisException implements Exception {
   }
 }
 
-final class KataGoConnectionException extends KataGoAnalysisException {
+base class KataGoConnectionException extends KataGoAnalysisException {
   const KataGoConnectionException(super.message, {super.requestId});
 }
 
-final class KataGoProtocolException extends KataGoAnalysisException {
+/// A connection or whole-request deadline elapsed.
+final class KataGoTimeoutException extends KataGoConnectionException {
+  const KataGoTimeoutException(super.message, {super.requestId});
+}
+
+base class KataGoProtocolException extends KataGoAnalysisException {
   const KataGoProtocolException(super.message, {super.requestId, super.field});
 }
 
-final class KataGoRequestException extends KataGoAnalysisException {
+/// An inbound frame exceeded an explicit resource or complexity budget.
+final class KataGoResponseLimitException extends KataGoProtocolException {
+  const KataGoResponseLimitException(
+    super.message, {
+    super.requestId,
+    super.field,
+  });
+}
+
+base class KataGoRequestException extends KataGoAnalysisException {
   const KataGoRequestException(super.message, {super.requestId, super.field});
 }
 
-final class KataGoMissingPlayedMoveException extends KataGoAnalysisException {
-  const KataGoMissingPlayedMoveException({
-    required String requestId,
-    required this.turnNumber,
-    required this.playedMove,
-  }) : super(
-         'The previous position did not contain the played move in moveInfos; '
-         'loss cannot be verified.',
-         requestId: requestId,
-         field: 'moveInfos',
-       );
-
-  final int turnNumber;
-  final Move playedMove;
-
-  @override
-  String toString() =>
-      '${super.toString()} (turn=$turnNumber, move=$playedMove)';
+/// A syntactically valid error returned by the remote KataGo service.
+final class KataGoRemoteException extends KataGoRequestException {
+  const KataGoRemoteException(super.message, {super.requestId, super.field});
 }
 
 final class KataGoAnalysisCancelledException extends KataGoAnalysisException {

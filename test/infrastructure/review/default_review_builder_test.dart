@@ -125,12 +125,21 @@ void main() {
         fixture.analysis.moves[2],
         removePointLoss: true,
       );
+      final missingPolicy = copyMoveAnalysis(
+        fixture.analysis.moves[2],
+        removePlayedMovePolicy: true,
+      );
       final rootWithLoss = copyMoveAnalysis(
         fixture.analysis.moves[0],
         pointLoss: 1,
       );
 
-      for (final node in [noRootCandidates, missingLoss, rootWithLoss]) {
+      for (final node in [
+        noRootCandidates,
+        missingLoss,
+        missingPolicy,
+        rootWithLoss,
+      ]) {
         expect(
           () => builder.build(
             fixture.record,
@@ -216,6 +225,30 @@ void main() {
         );
       }
     });
+
+    test('rejects an occupied candidate even when no PV is supplied', () {
+      final fixture = reviewFixture(moveCount: 4);
+      final node = fixture.analysis.moves[1];
+      final occupied = copyCandidate(
+        node.candidates.first,
+        move: Move.play(
+          color: StoneColor.white,
+          point: fixture.record.moves.first.point!,
+        ),
+      );
+      final replacement = _replaceCandidates(node, <Candidate>[
+        occupied,
+        ...node.candidates.skip(1),
+      ]);
+
+      expect(
+        () => builder.build(
+          fixture.record,
+          _withNode(fixture.analysis, 1, replacement),
+        ),
+        _throwsReviewInput(ReviewInputErrorCode.invalidCandidates),
+      );
+    });
   });
 
   group('DefaultReviewBuilder numeric report', () {
@@ -234,7 +267,7 @@ void main() {
       final report = builder.build(fixture.record, fixture.analysis);
 
       expect(
-        report.keyMoments.map((moment) => moment.analysis.moveNumber),
+        report.keyMoments.map((moment) => moment.moveNumber),
         orderedEquals(<int>[1, 3, 6, 5]),
       );
       expect(
@@ -242,8 +275,36 @@ void main() {
         orderedEquals(<int>[1, 2, 3, 4]),
       );
       expect(
-        report.keyMoments.map((moment) => moment.analysis.playedMovePointLoss),
+        report.keyMoments.map((moment) => moment.after.playedMovePointLoss),
         orderedEquals(<double>[4, 4, 3, 2]),
+      );
+      for (final moment in report.keyMoments) {
+        expect(moment.before.moveNumber + 1, moment.after.moveNumber);
+        expect(moment.playedMove, moment.after.playedMove);
+      }
+      expect(report.keyMoments.first.candidateRank, 1);
+    });
+
+    test('retains before/after evidence when the played move is unlisted', () {
+      final fixture = reviewFixture(
+        moveCount: 4,
+        candidateRankForMove: (_) => 6,
+        pointLossForMove: (moveNumber) => moveNumber.toDouble(),
+      );
+
+      final moment = builder
+          .build(fixture.record, fixture.analysis)
+          .keyMoments
+          .first;
+
+      expect(moment.moveNumber, 4);
+      expect(moment.candidateRank, isNull);
+      expect(moment.before.moveNumber, 3);
+      expect(moment.after.moveNumber, 4);
+      expect(moment.playedMove, fixture.record.moves[3]);
+      expect(
+        moment.before.candidates.map((candidate) => candidate.move),
+        isNot(contains(moment.playedMove)),
       );
     });
 
@@ -344,8 +405,8 @@ List<Object> _reviewSnapshot(ReviewReport report) => <Object>[
   report.documentId,
   report.analysisRequestId,
   for (final moment in report.keyMoments)
-    '${moment.severityRank}:${moment.analysis.moveNumber}:'
-        '${moment.analysis.playedMovePointLoss}',
+    '${moment.severityRank}:${moment.moveNumber}:'
+        '${moment.after.playedMovePointLoss}:${moment.candidateRank}',
   for (final point in report.scoreTrend)
     '${point.moveNumber}:${point.scoreLead}:${point.blackWinRate}',
   report.metrics.averagePointLoss,

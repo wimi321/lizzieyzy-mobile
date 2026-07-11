@@ -18,12 +18,19 @@ final class RuleViolation {
 final class RuleValidationResult {
   RuleValidationResult({
     required this.finalPosition,
+    required List<BoardPosition> positions,
     required List<RuleViolation> violations,
     required this.blackCaptured,
     required this.whiteCaptured,
-  }) : violations = List.unmodifiable(violations);
+  }) : positions = List.unmodifiable(positions),
+       violations = List.unmodifiable(violations);
 
   final BoardPosition finalPosition;
+
+  /// Capture-correct immutable positions for the valid prefix, starting with
+  /// the initial position. A successful validation contains one position per
+  /// move plus the root position.
+  final List<BoardPosition> positions;
   final List<RuleViolation> violations;
 
   /// Number of stones of each color removed from the board.
@@ -66,8 +73,10 @@ abstract final class GoRuleValidator {
     var expectedColor = firstPlayer;
     var blackCaptured = 0;
     var whiteCaptured = 0;
+    final positions = <BoardPosition>[initialPosition];
 
     final positionHistory = <String>[initialPosition.signature];
+    final positionHistorySet = <String>{initialPosition.signature};
     final situationHistory = <String>{
       '${initialPosition.signature}|${firstPlayer.name}',
     };
@@ -78,6 +87,7 @@ abstract final class GoRuleValidator {
       String message,
     ) => RuleValidationResult(
       finalPosition: BoardPosition(size: initialPosition.size, stones: board),
+      positions: positions,
       violations: [
         RuleViolation(moveIndex: moveIndex, code: code, message: message),
       ],
@@ -99,7 +109,9 @@ abstract final class GoRuleValidator {
         expectedColor = expectedColor.opponent;
         final signature = _signature(initialPosition.size, board);
         positionHistory.add(signature);
+        positionHistorySet.add(signature);
         situationHistory.add('$signature|${expectedColor.name}');
+        positions.add(BoardPosition(size: initialPosition.size, stones: board));
         continue;
       }
 
@@ -158,7 +170,7 @@ abstract final class GoRuleValidator {
         KoRule.simple =>
           positionHistory.length >= 2 &&
               signature == positionHistory[positionHistory.length - 2],
-        KoRule.positionalSuperko => positionHistory.contains(signature),
+        KoRule.positionalSuperko => positionHistorySet.contains(signature),
         KoRule.situationalSuperko => situationHistory.contains(
           '$signature|${nextPlayer.name}',
         ),
@@ -179,11 +191,14 @@ abstract final class GoRuleValidator {
       }
       expectedColor = nextPlayer;
       positionHistory.add(signature);
+      positionHistorySet.add(signature);
       situationHistory.add('$signature|${expectedColor.name}');
+      positions.add(BoardPosition(size: initialPosition.size, stones: board));
     }
 
     return RuleValidationResult(
       finalPosition: BoardPosition(size: initialPosition.size, stones: board),
+      positions: positions,
       violations: const [],
       blackCaptured: blackCaptured,
       whiteCaptured: whiteCaptured,

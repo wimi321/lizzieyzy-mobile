@@ -47,4 +47,78 @@ line two \] bracket \\ slash];B[pd](;W[dd]C[main])(;W[dp]))''');
       throwsA(isA<SgfFormatException>()),
     );
   });
+
+  test('rejects input, node, property, and value resource exhaustion', () {
+    void expectLimit(
+      SgfSyntaxParser limited,
+      String source,
+      KifuResourceLimitKind kind,
+    ) {
+      expect(
+        () => limited.parseSingleGame(source),
+        throwsA(
+          isA<KifuResourceLimitException>().having(
+            (error) => error.kind,
+            'kind',
+            kind,
+          ),
+        ),
+      );
+    }
+
+    expectLimit(
+      const SgfSyntaxParser(limits: KifuResourceLimits(maxInputCharacters: 12)),
+      '(;C[more than twelve])',
+      KifuResourceLimitKind.inputCharacters,
+    );
+    expectLimit(
+      const SgfSyntaxParser(limits: KifuResourceLimits(maxNodes: 2)),
+      '(;B[aa];W[bb];B[cc])',
+      KifuResourceLimitKind.nodes,
+    );
+    expectLimit(
+      const SgfSyntaxParser(
+        limits: KifuResourceLimits(maxPropertiesPerNode: 2),
+      ),
+      '(;A[1]B[2]C[3])',
+      KifuResourceLimitKind.propertiesPerNode,
+    );
+    expectLimit(
+      const SgfSyntaxParser(
+        limits: KifuResourceLimits(maxPropertyValueCharacters: 8),
+      ),
+      '(;C[123456789])',
+      KifuResourceLimitKind.propertyValueCharacters,
+    );
+    expectLimit(
+      const SgfSyntaxParser(
+        limits: KifuResourceLimits(maxPropertyValuesPerProperty: 2),
+      ),
+      '(;AB[aa][bb][cc])',
+      KifuResourceLimitKind.propertyValuesPerProperty,
+    );
+  });
+
+  test(
+    'bounds variation recursion before adversarial nesting reaches stack',
+    () {
+      const attemptedDepth = 512;
+      final source =
+          List<String>.filled(attemptedDepth, '(;C[x]').join() +
+          List<String>.filled(attemptedDepth, ')').join();
+
+      expect(
+        () => parser.parseSingleGame(source),
+        throwsA(
+          isA<KifuResourceLimitException>()
+              .having(
+                (error) => error.kind,
+                'kind',
+                KifuResourceLimitKind.variationDepth,
+              )
+              .having((error) => error.actual, 'actual', 129),
+        ),
+      );
+    },
+  );
 }

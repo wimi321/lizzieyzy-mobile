@@ -1,4 +1,5 @@
 import '../../domain/domain.dart';
+import 'kifu_resource_limits.dart';
 
 enum GibImportWarningCode {
   malformedMetadata,
@@ -37,14 +38,19 @@ final class GibImportResult {
 /// a verified game. Text decoding is intentionally the caller's responsibility
 /// because legacy files may be UTF-8, CP949, Big5, or GBK.
 final class GibCodec {
-  const GibCodec();
+  const GibCodec({this.limits = const KifuResourceLimits()});
+
+  final KifuResourceLimits limits;
 
   GibImportResult decode(
     String source, {
     required String documentId,
     KifuSource kifuSource = const KifuSource(kind: KifuSourceKind.localFile),
   }) {
-    if (source.trim().isEmpty) {
+    limits
+      ..enforceInputCharacters(source.length)
+      ..enforceVariationDepth(1);
+    if (!_containsNonWhitespace(source)) {
       throw const FormatException('A GIB record cannot be empty.');
     }
     final warnings = <GibImportWarning>[];
@@ -52,28 +58,81 @@ final class GibCodec {
     final moves = <Move>[];
     final moveNumbers = <int>[];
     var handicap = 0;
+    var hasInvalidMoveLine = false;
+    var hasUnsupportedHandicap = false;
 
-    for (final rawLine in source.split(RegExp(r'\r?\n'))) {
+    var lineCount = 0;
+    var propertyCount = 0;
+    var propertyValueCount = 0;
+
+    void consumeProperty({required int values, int? valueCharacters}) {
+      propertyCount++;
+      propertyValueCount += values;
+      limits
+        ..enforceProperties(propertyCount)
+        ..enforcePropertiesPerNode(1)
+        ..enforcePropertyValuesPerProperty(values)
+        ..enforcePropertyValues(propertyValueCount);
+      if (valueCharacters != null) {
+        limits.enforcePropertyValueCharacters(valueCharacters);
+      }
+    }
+
+    for (final rawLine in _gibLines(source)) {
+      lineCount++;
+      limits
+        ..enforceNodes(lineCount)
+        ..enforceLineCharacters(rawLine.length);
       final line = rawLine.trim();
       final tagMatch = RegExp(r'^\\\[([A-Z0-9_]+)=(.*)\\\]$').firstMatch(line);
       if (tagMatch != null) {
-        tags[tagMatch.group(1)!] = tagMatch.group(2)!;
+        final identifier = tagMatch.group(1)!;
+        final value = tagMatch.group(2)!;
+        limits.enforcePropertyIdentifierCharacters(identifier.length);
+        consumeProperty(values: 1, valueCharacters: value.length);
+        tags[identifier] = value;
         continue;
       }
       if (line.startsWith('INI ')) {
-        final fields = line.split(RegExp(r'\s+'));
+        final fields = _splitWhitespaceFields(line, limits);
+        consumeProperty(values: fields.length);
         if (fields.length >= 4) {
-          handicap = int.tryParse(fields[3]) ?? 0;
+          final parsedHandicap = int.tryParse(fields[3]);
+          if (parsedHandicap == 0 ||
+              (parsedHandicap != null &&
+                  parsedHandicap >= 2 &&
+                  parsedHandicap <= 9)) {
+            handicap = parsedHandicap!;
+          } else {
+            hasUnsupportedHandicap = true;
+            handicap = 0;
+            warnings.add(
+              const GibImportWarning(
+                code: GibImportWarningCode.malformedMetadata,
+                message: 'The GIB handicap value is unsupported.',
+              ),
+            );
+          }
+        } else {
+          hasUnsupportedHandicap = true;
+          warnings.add(
+            const GibImportWarning(
+              code: GibImportWarningCode.malformedMetadata,
+              message: 'The GIB initialization line is incomplete.',
+            ),
+          );
         }
         continue;
       }
       if (!line.startsWith('STO ')) continue;
-      final fields = line.split(RegExp(r'\s+'));
+      final fields = _splitWhitespaceFields(line, limits);
+      consumeProperty(values: fields.length);
       if (fields.length < 6) {
+        hasInvalidMoveLine = true;
         warnings.add(
           GibImportWarning(
             code: GibImportWarningCode.invalidMove,
-            message: 'Ignored malformed GIB move line: $line',
+            message: 'Ignored malformed GIB move line: ${_linePreview(line)}',
           ),
         );
         continue;
@@ -86,10 +145,11 @@ final class GibCodec {
           (colorCode != 1 && colorCode != 2) ||
           column == null ||
           row == null) {
+        hasInvalidMoveLine = true;
         warnings.add(
           GibImportWarning(
             code: GibImportWarningCode.invalidMove,
-            message: 'Ignored unparseable GIB move line: $line',
+            message: 'Ignored unparseable GIB move line: ${_linePreview(line)}',
           ),
         );
         continue;
@@ -99,6 +159,7 @@ final class GibCodec {
           ? Move.pass(color: color)
           : Move.play(color: color, point: BoardPoint(column, row));
       if (!move.isPass && !move.point!.isOn(BoardSize.nineteen)) {
+        hasInvalidMoveLine = true;
         warnings.add(
           GibImportWarning(
             code: GibImportWarningCode.invalidMove,
@@ -110,8 +171,13 @@ final class GibCodec {
       moveNumbers.add(number);
       moves.add(move);
     }
+    limits.enforceMoves(moves.length);
 
-    var numbersAreContinuous = true;
+    // Observed complete Tygem GIB records use a counter beginning at 2; a
+    // small legacy dialect begins at 1. A later but internally consecutive
+    // counter (for example 87, 88, ...) is a fragment, not a complete game.
+    var numbersAreContinuous =
+        moveNumbers.isEmpty || moveNumbers.first == 1 || moveNumbers.first == 2;
     for (var index = 1; index < moveNumbers.length; index++) {
       if (moveNumbers[index] != moveNumbers[index - 1] + 1) {
         numbersAreContinuous = false;
@@ -151,9 +217,9 @@ final class GibCodec {
       size: BoardSize.nineteen,
       stones: _handicapStones(handicap),
     );
-    final firstPlayer = moves.isEmpty
-        ? (handicap >= 2 ? StoneColor.white : StoneColor.black)
-        : moves.first.color;
+    final expectedFirstPlayer = handicap >= 2
+        ? StoneColor.white
+        : StoneColor.black;
 
     late final KifuDocument document;
     if (moves.isEmpty) {
@@ -163,16 +229,19 @@ final class GibCodec {
         rules: rules,
         source: kifuSource,
         metadata: metadata,
-        playerToMove: firstPlayer,
+        playerToMove: expectedFirstPlayer,
       );
     } else {
       final validation = GoRuleValidator.validate(
         initialPosition: initialPosition,
         moves: moves,
         rules: rules,
-        firstPlayer: firstPlayer,
+        firstPlayer: expectedFirstPlayer,
       );
-      if (validation.isValid && numbersAreContinuous) {
+      if (validation.isValid &&
+          numbersAreContinuous &&
+          !hasInvalidMoveLine &&
+          !hasUnsupportedHandicap) {
         document = VerifiedGameRecord(
           id: documentId,
           initialPosition: initialPosition,
@@ -180,7 +249,7 @@ final class GibCodec {
           rules: rules,
           source: kifuSource,
           metadata: metadata,
-          firstPlayer: firstPlayer,
+          firstPlayer: expectedFirstPlayer,
         );
       } else {
         if (!validation.isValid) {
@@ -199,7 +268,7 @@ final class GibCodec {
           source: kifuSource,
           metadata: metadata,
           startingMoveNumber: moveNumbers.isEmpty ? 1 : moveNumbers.first,
-          firstPlayer: firstPlayer,
+          firstPlayer: moves.first.color,
         );
       }
     }
@@ -212,6 +281,57 @@ final class GibCodec {
     );
   }
 }
+
+Iterable<String> _gibLines(String source) sync* {
+  var start = 0;
+  for (var index = 0; index < source.length; index++) {
+    if (source.codeUnitAt(index) != 0x0A) continue;
+    var end = index;
+    if (end > start && source.codeUnitAt(end - 1) == 0x0D) end--;
+    yield source.substring(start, end);
+    start = index + 1;
+  }
+  if (start < source.length) yield source.substring(start);
+}
+
+bool _containsNonWhitespace(String source) {
+  for (var index = 0; index < source.length; index++) {
+    if (!_isAsciiWhitespace(source.codeUnitAt(index))) return true;
+  }
+  return false;
+}
+
+List<String> _splitWhitespaceFields(String line, KifuResourceLimits limits) {
+  final fields = <String>[];
+  var offset = 0;
+  while (offset < line.length) {
+    while (offset < line.length &&
+        _isAsciiWhitespace(line.codeUnitAt(offset))) {
+      offset++;
+    }
+    if (offset >= line.length) break;
+    final start = offset;
+    while (offset < line.length &&
+        !_isAsciiWhitespace(line.codeUnitAt(offset))) {
+      offset++;
+      limits.enforcePropertyValueCharacters(offset - start);
+    }
+    fields.add(line.substring(start, offset));
+    limits.enforcePropertyValuesPerProperty(fields.length);
+  }
+  return fields;
+}
+
+bool _isAsciiWhitespace(int codeUnit) =>
+    codeUnit == 0x20 ||
+    codeUnit == 0x09 ||
+    codeUnit == 0x0A ||
+    codeUnit == 0x0D ||
+    codeUnit == 0x0B ||
+    codeUnit == 0x0C;
+
+String _linePreview(String line) =>
+    line.length <= 160 ? line : '${line.substring(0, 160)}…';
 
 int? _namedInteger(String source, String key) {
   final match = RegExp('(?:^|,)$key:(-?\\d+)(?:,|\$)').firstMatch(source);

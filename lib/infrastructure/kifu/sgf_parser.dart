@@ -1,4 +1,5 @@
 import '../../domain/domain.dart';
+import 'kifu_resource_limits.dart';
 
 /// A syntax or mandatory-value failure with an exact source offset.
 final class SgfFormatException extends FormatException {
@@ -10,10 +11,14 @@ final class SgfFormatException extends FormatException {
 /// It preserves every property, comment, node, and variation in the domain's
 /// [SgfGameTree]. Go-specific semantic checks are performed by [SgfCodec].
 final class SgfSyntaxParser {
-  const SgfSyntaxParser();
+  const SgfSyntaxParser({this.limits = const KifuResourceLimits()});
 
-  List<SgfGameTree> parseCollection(String source) =>
-      _SgfReader(source).parse();
+  final KifuResourceLimits limits;
+
+  List<SgfGameTree> parseCollection(String source) {
+    limits.enforceInputCharacters(source.length);
+    return _SgfReader(source, limits).parse();
+  }
 
   SgfGameTree parseSingleGame(String source) {
     final games = parseCollection(source);
@@ -29,10 +34,14 @@ final class SgfSyntaxParser {
 }
 
 final class _SgfReader {
-  _SgfReader(this.source);
+  _SgfReader(this.source, this.limits);
 
   final String source;
+  final KifuResourceLimits limits;
   int _offset = 0;
+  int _nodeCount = 0;
+  int _propertyCount = 0;
+  int _propertyValueCount = 0;
 
   List<SgfGameTree> parse() {
     _skipWhitespace();
@@ -40,13 +49,15 @@ final class _SgfReader {
 
     final games = <SgfGameTree>[];
     while (!_isAtEnd) {
-      games.add(_parseGameTree());
+      limits.enforceGameTrees(games.length + 1);
+      games.add(_parseGameTree(1));
       _skipWhitespace();
     }
     return List.unmodifiable(games);
   }
 
-  SgfGameTree _parseGameTree() {
+  SgfGameTree _parseGameTree(int depth) {
+    limits.enforceVariationDepth(depth);
     _expect('(');
     _skipWhitespace();
 
@@ -61,7 +72,7 @@ final class _SgfReader {
 
     final variations = <SgfGameTree>[];
     while (_peek == '(') {
-      variations.add(_parseGameTree());
+      variations.add(_parseGameTree(depth + 1));
       _skipWhitespace();
     }
     _expect(')');
@@ -69,12 +80,20 @@ final class _SgfReader {
   }
 
   SgfNode _parseNode() {
+    _nodeCount++;
+    limits.enforceNodes(_nodeCount);
     _expect(';');
     _skipWhitespace();
     final properties = <SgfProperty>[];
     final identifiers = <String>{};
+    var nodePropertyCount = 0;
 
     while (_peek != null && _isUppercaseAscii(_peek!)) {
+      nodePropertyCount++;
+      _propertyCount++;
+      limits
+        ..enforcePropertiesPerNode(nodePropertyCount)
+        ..enforceProperties(_propertyCount);
       final identifier = _parseIdentifier();
       if (!identifiers.add(identifier)) {
         _fail('Duplicate property $identifier in one SGF node.');
@@ -85,6 +104,10 @@ final class _SgfReader {
       }
       final values = <String>[];
       while (_peek == '[') {
+        _propertyValueCount++;
+        limits
+          ..enforcePropertyValuesPerProperty(values.length + 1)
+          ..enforcePropertyValues(_propertyValueCount);
         values.add(_parsePropertyValue());
         _skipWhitespace();
       }
@@ -97,6 +120,7 @@ final class _SgfReader {
     final start = _offset;
     while (_peek != null && _isUppercaseAscii(_peek!)) {
       _offset++;
+      limits.enforcePropertyIdentifierCharacters(_offset - start);
     }
     return source.substring(start, _offset);
   }
@@ -104,17 +128,28 @@ final class _SgfReader {
   String _parsePropertyValue() {
     _expect('[');
     final buffer = StringBuffer();
+    var valueCharacters = 0;
+    void consumeValueCharacters([int count = 1]) {
+      valueCharacters += count;
+      limits.enforcePropertyValueCharacters(valueCharacters);
+    }
+
     while (!_isAtEnd) {
       final character = source[_offset++];
       if (character == ']') return buffer.toString();
+      consumeValueCharacters();
 
       if (character == '\\') {
         if (_isAtEnd) {
           _fail('A property value cannot end with an escape character.');
         }
         final escaped = source[_offset++];
+        consumeValueCharacters();
         if (escaped == '\r') {
-          if (_peek == '\n') _offset++;
+          if (_peek == '\n') {
+            _offset++;
+            consumeValueCharacters();
+          }
           continue;
         }
         if (escaped == '\n') continue;
@@ -123,7 +158,10 @@ final class _SgfReader {
       }
 
       if (character == '\r') {
-        if (_peek == '\n') _offset++;
+        if (_peek == '\n') {
+          _offset++;
+          consumeValueCharacters();
+        }
         buffer.write('\n');
       } else {
         buffer.write(character);

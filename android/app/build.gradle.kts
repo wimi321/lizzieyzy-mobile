@@ -1,3 +1,5 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -15,10 +17,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17.toString()
-    }
-
     defaultConfig {
         applicationId = "com.wimi321.lizzieyzy.mobile"
         minSdk = 29
@@ -28,7 +26,25 @@ android {
     }
 
     buildTypes {
-        release { }
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            ndk {
+                // Preserve function-level native crash symbols as a separate,
+                // release-evidence artifact without increasing the APK payload.
+                debugSymbolLevel = "SYMBOL_TABLE"
+            }
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+        }
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_17)
     }
 }
 

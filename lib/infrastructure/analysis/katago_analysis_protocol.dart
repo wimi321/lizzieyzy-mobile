@@ -41,6 +41,8 @@ final class KataGoTurnResult {
     required this.blackScoreLead,
     required this.visits,
     required this.candidates,
+    required this.policy,
+    required this.humanPolicy,
     required this.ownership,
   });
 
@@ -51,6 +53,8 @@ final class KataGoTurnResult {
   final double blackScoreLead;
   final int visits;
   final List<KataGoCandidateResult> candidates;
+  final List<double> policy;
+  final List<double> humanPolicy;
   final List<double> ownership;
 
   KataGoCandidateResult get bestCandidate {
@@ -60,14 +64,21 @@ final class KataGoTurnResult {
     throw StateError('KataGo result has no order-0 candidate.');
   }
 
-  bool containsMove(Move move) =>
-      candidates.any((result) => result.candidate.move == move);
+  double policyForMove(Move move, BoardSize boardSize) =>
+      _policyForMove(policy, move, boardSize, field: 'policy');
+
+  double? humanPolicyForMove(Move move, BoardSize boardSize) =>
+      humanPolicy.isEmpty
+      ? null
+      : _policyForMove(humanPolicy, move, boardSize, field: 'humanPolicy');
 
   MoveAnalysis toDomain({
     required int maxCandidates,
     required Move? playedMove,
     double? pointLoss,
     double? winRateLoss,
+    double? playedMovePolicy,
+    double? playedMoveHumanPolicy,
   }) => MoveAnalysis(
     moveNumber: turnNumber,
     toPlay: currentPlayer,
@@ -81,6 +92,8 @@ final class KataGoTurnResult {
         .toList(growable: false),
     playedMovePointLoss: pointLoss,
     playedMoveWinRateLoss: winRateLoss,
+    playedMovePolicy: playedMovePolicy,
+    playedMoveHumanPolicy: playedMoveHumanPolicy,
     ownership: ownership,
   );
 }
@@ -91,6 +104,30 @@ final class KataGoAnalysisProtocol {
   final KataGoWssConfig config;
 
   KataGoProtocolRequest prepare(AnalysisRequest request) {
+    if (request.requestId.length > config.maxRequestIdLength ||
+        !_safeRequestId.hasMatch(request.requestId)) {
+      throw KataGoRequestException(
+        'requestId must use only ASCII letters, digits, dot, colon, underscore, '
+        'or hyphen and stay within the configured length limit.',
+        field: 'requestId',
+      );
+    }
+    if (request.settings.visitsPerMove < 1 ||
+        request.settings.visitsPerMove > config.maxVisitsPerMove) {
+      throw KataGoRequestException(
+        'visitsPerMove is outside the configured request budget.',
+        requestId: request.requestId,
+        field: 'visitsPerMove',
+      );
+    }
+    if (request.settings.maxCandidates < 1 ||
+        request.settings.maxCandidates > config.maxResponseCandidates) {
+      throw KataGoRequestException(
+        'maxCandidates is outside the configured response budget.',
+        requestId: request.requestId,
+        field: 'maxCandidates',
+      );
+    }
     final document = request.document;
     final BoardPosition initialPosition;
     final List<Move> moves;
@@ -117,6 +154,14 @@ final class KataGoAnalysisProtocol {
         firstPlayer = document.firstPlayer;
     }
 
+    if (moves.length + 1 > config.maxPositionsPerRequest) {
+      throw KataGoRequestException(
+        'The game exceeds the configured position-analysis budget.',
+        requestId: request.requestId,
+        field: 'moves',
+      );
+    }
+
     final dimension = document.boardSize.dimension;
     final initialStones = initialPosition.stones.entries.toList(growable: false)
       ..sort((left, right) => left.key.compareTo(right.key));
@@ -141,6 +186,11 @@ final class KataGoAnalysisProtocol {
       'analysisPVLen': config.analysisPvLength,
       'includeOwnership': request.settings.includeOwnership,
       'includePolicy': true,
+      if (config.humanStyleProfile case final profile?)
+        'overrideSettings': <String, Object>{
+          'humanSLProfile': 'rank_${profile.label}',
+          'ignorePreRootHistory': false,
+        },
     };
 
     return KataGoProtocolRequest(
@@ -201,6 +251,7 @@ final class KataGoAnalysisProtocol {
       'visits',
       requestId: requestId,
       min: 0,
+      max: config.maxVisitsPerMove,
     );
     final outputIsBlack = _outputPerspectiveIsBlack(currentPlayer);
     final blackWinRate = outputIsBlack ? rawRootWinRate : 1 - rawRootWinRate;
@@ -210,15 +261,37 @@ final class KataGoAnalysisProtocol {
         : 1 - rawRootWinRate;
     final blackScoreLead = outputIsBlack ? rawRootScore : -rawRootScore;
 
-    final rawPolicy = _optionalPolicy(
+    final rawPolicy = _requiredPolicy(
       json['policy'],
       boardSize: prepared.request.document.boardSize,
       requestId: requestId,
+      field: 'policy',
     );
+    final rawHumanPolicy = config.humanStyleProfile == null
+        ? const <double>[]
+        : _requiredPolicy(
+            json['humanPolicy'],
+            boardSize: prepared.request.document.boardSize,
+            requestId: requestId,
+            field: 'humanPolicy',
+          );
     final moveInfoValues = json['moveInfos'];
     if (moveInfoValues is! List) {
       throw KataGoProtocolException(
         'moveInfos must be a JSON array.',
+        requestId: requestId,
+        field: 'moveInfos',
+      );
+    }
+    final candidateLimit = math.min(
+      config.maxResponseCandidates,
+      prepared.request.document.boardSize.dimension *
+              prepared.request.document.boardSize.dimension +
+          1,
+    );
+    if (moveInfoValues.length > candidateLimit) {
+      throw KataGoResponseLimitException(
+        'moveInfos exceeds the configured candidate budget.',
         requestId: requestId,
         field: 'moveInfos',
       );
@@ -242,6 +315,7 @@ final class KataGoAnalysisProtocol {
         'order',
         requestId: requestId,
         min: 0,
+        max: candidateLimit - 1,
       );
       if (!orders.add(order)) {
         throw KataGoProtocolException(
@@ -280,6 +354,7 @@ final class KataGoAnalysisProtocol {
         'visits',
         requestId: requestId,
         min: 0,
+        max: config.maxVisitsPerMove,
       );
       final prior = info.containsKey('prior')
           ? _requiredProbability(info, 'prior', requestId: requestId)
@@ -287,18 +362,19 @@ final class KataGoAnalysisProtocol {
               rawPolicy,
               move,
               prepared.request.document.boardSize,
+              field: 'policy',
             );
-      if (prior == null) {
-        throw KataGoProtocolException(
-          'A moveInfo must contain prior, or the response must contain policy.',
-          requestId: requestId,
-          field: 'moveInfos[$index].prior',
-        );
-      }
       final rawPv = info['pv'];
       if (rawPv is! List) {
         throw KataGoProtocolException(
           'pv must be a JSON array.',
+          requestId: requestId,
+          field: 'moveInfos[$index].pv',
+        );
+      }
+      if (rawPv.length > config.analysisPvLength) {
+        throw KataGoResponseLimitException(
+          'pv exceeds the requested analysisPVLen.',
           requestId: requestId,
           field: 'moveInfos[$index].pv',
         );
@@ -369,6 +445,8 @@ final class KataGoAnalysisProtocol {
       blackScoreLead: blackScoreLead,
       visits: visits,
       candidates: List.unmodifiable(candidates),
+      policy: List.unmodifiable(rawPolicy),
+      humanPolicy: List.unmodifiable(rawHumanPolicy),
       ownership: List.unmodifiable(ownership),
     );
   }
@@ -380,6 +458,8 @@ final class KataGoAnalysisProtocol {
         KataGoReportPerspective.sideToMove => currentPlayer == StoneColor.black,
       };
 }
+
+final RegExp _safeRequestId = RegExp(r'^[A-Za-z0-9._:-]+$');
 
 String _moveLocation(Move move, BoardSize boardSize) =>
     move.isPass ? 'pass' : move.point!.toGtp(boardSize);
@@ -478,6 +558,7 @@ int _requiredInteger(
   String field, {
   required String requestId,
   required int min,
+  int? max,
 }) {
   final value = json[field];
   if (value is! num || !value.isFinite || value != value.roundToDouble()) {
@@ -491,6 +572,13 @@ int _requiredInteger(
   if (integer < min) {
     throw KataGoProtocolException(
       '$field must be at least $min.',
+      requestId: requestId,
+      field: field,
+    );
+  }
+  if (max != null && integer > max) {
+    throw KataGoResponseLimitException(
+      '$field must be at most $max.',
       requestId: requestId,
       field: field,
     );
@@ -530,39 +618,50 @@ double _requiredProbability(
   return value;
 }
 
-List<double>? _optionalPolicy(
+List<double> _requiredPolicy(
   Object? value, {
   required BoardSize boardSize,
   required String requestId,
+  required String field,
 }) {
-  if (value == null) return null;
   if (value is! List ||
       value.length != boardSize.dimension * boardSize.dimension + 1) {
     throw KataGoProtocolException(
-      'policy must contain one value per intersection plus pass.',
+      '$field must contain one value per intersection plus pass.',
       requestId: requestId,
-      field: 'policy',
+      field: field,
     );
   }
   return List<double>.generate(value.length, (index) {
     final entry = value[index];
     if (entry is! num || !entry.isFinite || entry < -1 || entry > 1) {
       throw KataGoProtocolException(
-        'policy values must be finite and between -1 and 1.',
+        '$field values must be finite and between -1 and 1.',
         requestId: requestId,
-        field: 'policy[$index]',
+        field: '$field[$index]',
       );
     }
     return entry.toDouble();
   }, growable: false);
 }
 
-double? _policyForMove(List<double>? policy, Move move, BoardSize boardSize) {
-  if (policy == null) return null;
+double _policyForMove(
+  List<double> policy,
+  Move move,
+  BoardSize boardSize, {
+  required String field,
+}) {
   final index = move.isPass
       ? policy.length - 1
       : move.point!.row * boardSize.dimension + move.point!.column;
-  return math.max(0, policy[index]);
+  final value = policy[index];
+  if (value < 0) {
+    throw KataGoProtocolException(
+      'KataGo marked a rule-checked move as illegal in $field.',
+      field: '$field[$index]',
+    );
+  }
+  return value;
 }
 
 List<double> _parseOwnership(

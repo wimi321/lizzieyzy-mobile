@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lizzieyzy_mobile/application/scan/scan.dart';
+import 'package:lizzieyzy_mobile/design_system/design_system.dart';
+import 'package:lizzieyzy_mobile/l10n/l10n.dart';
 
 import '../features/home/presentation/kifu_home_screen.dart';
 import '../features/scan/presentation/camera_capture_screen.dart';
@@ -36,7 +38,7 @@ class _HomeShellState extends State<HomeShell> {
                 controller: widget.scanController,
               )
             else
-              const ColoredBox(color: Color(0xFF0B100D)),
+              const ColoredBox(color: GoCameraColors.background),
           ],
         ),
         bottomNavigationBar: NavigationBar(
@@ -49,18 +51,18 @@ class _HomeShellState extends State<HomeShell> {
             // controller, preview texture, and green privacy indicator.
             _scanMounted = index == 1;
           }),
-          destinations: const <NavigationDestination>[
+          destinations: <NavigationDestination>[
             NavigationDestination(
-              icon: Icon(Icons.grid_view_outlined),
-              selectedIcon: Icon(Icons.grid_view_rounded),
-              label: '棋谱',
-              tooltip: '棋谱首页',
+              icon: const Icon(Icons.grid_view_outlined),
+              selectedIcon: const Icon(Icons.grid_view_rounded),
+              label: context.l10n.kifuTab,
+              tooltip: context.l10n.kifuHomeTooltip,
             ),
             NavigationDestination(
-              icon: Icon(Icons.document_scanner_outlined),
-              selectedIcon: Icon(Icons.document_scanner_rounded),
-              label: '识谱',
-              tooltip: '拍照识谱',
+              icon: const Icon(Icons.document_scanner_outlined),
+              selectedIcon: const Icon(Icons.document_scanner_rounded),
+              label: context.l10n.scanTab,
+              tooltip: context.l10n.photoScanTooltip,
             ),
           ],
         ),

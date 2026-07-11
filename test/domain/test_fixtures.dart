@@ -22,6 +22,7 @@ ModelManifest modelFixture() => ModelManifest(
   engineVersion: '1.16.5',
   modelVersion: 'b10-test',
   license: 'CC-BY-4.0',
+  humanModelSha256: List.filled(64, 'd').join(),
   humanStyleRanks: [GoRank.kyu(3), GoRank.kyu(1)],
 );
 
@@ -84,6 +85,7 @@ AnalysisBundle analysisFixture({
       ],
       playedMovePointLoss: 0.3,
       playedMoveWinRateLoss: 0.01,
+      playedMovePolicy: 0.23,
     ),
   ],
   completedAt: DateTime.utc(2026, 7, 11),

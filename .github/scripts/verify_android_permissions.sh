@@ -7,12 +7,39 @@ if [ ! -f "$APK" ]; then
   echo "APK not found: $APK" >&2
   exit 1
 fi
-if ! command -v apkanalyzer >/dev/null 2>&1; then
+apkanalyzer_path="$(command -v apkanalyzer 2>/dev/null || true)"
+
+if [ -z "$apkanalyzer_path" ]; then
+  for sdk_root in \
+    "${ANDROID_SDK_ROOT:-}" \
+    "${ANDROID_HOME:-}" \
+    "$HOME/Android/Sdk" \
+    "$HOME/Library/Android/sdk"; do
+    [ -n "$sdk_root" ] || continue
+
+    for candidate in \
+      "$sdk_root/cmdline-tools/latest/bin/apkanalyzer" \
+      "$sdk_root/tools/bin/apkanalyzer"; do
+      if [ -x "$candidate" ]; then
+        apkanalyzer_path="$candidate"
+        break 2
+      fi
+    done
+
+    candidate="$(find "$sdk_root/cmdline-tools" -type f -path '*/bin/apkanalyzer' 2>/dev/null | sort | tail -n 1)"
+    if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+      apkanalyzer_path="$candidate"
+      break
+    fi
+  done
+fi
+
+if [ -z "$apkanalyzer_path" ]; then
   echo "apkanalyzer is required for permission verification" >&2
   exit 1
 fi
 
-permissions="$(apkanalyzer manifest permissions "$APK" | sort -u)"
+permissions="$("$apkanalyzer_path" manifest permissions "$APK" | sort -u)"
 unexpected="$(printf '%s\n' "$permissions" | grep -Ev \
   '^(android\.permission\.(CAMERA|INTERNET|ACCESS_NETWORK_STATE)|com\.wimi321\.lizzieyzy\.mobile\.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION)$' \
   || true)"

@@ -214,10 +214,16 @@ jobs:
         run: >-
           python3 .github/scripts/verify_privacy_declarations.py
           --app build/ios/iphoneos/Runner.app
+      - name: Require reproducible CocoaPods lockfile
+        shell: bash
+        run: |
+          pod --version
+          if ! git diff --exit-code -- ios/Podfile.lock; then
+            shasum -a 256 ios/Podfile.lock
+            exit 1
+          fi
       - name: Verify CocoaPods licenses and notices
         run: python3 tool/native_licenses.py cocoapods --check
-      - name: Require reproducible CocoaPods lockfile
-        run: git diff --exit-code -- ios/Podfile.lock
       - name: Validate every dSYM UUID and archive release crash symbols
         run: >-
           python3 tool/release_symbols.py ios

@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "benchmarkVersion": "1.0.0",
+  "product": "LizzieYZY Mobile",
+  "generatedAt": "2026-07-10T00:00:00+08:00",
+  "generator": {
+    "mode": "built-in-imagegen",
+    "useCase": "ui-mockup"
+  },
+  "visualDirection": "modern-eastern-minimal",
+  "logicalPhoneSize": {"width": 390, "height": 844},
+  "logicalTabletSize": {"width": 1024, "height": 768},
+  "selection": {
+    "rubric": {
+      "goInformationClarity": 25,
+      "visualHierarchy": 20,
+      "aestheticDistinctiveness": 20,
+      "implementationFeasibility": 20,
+      "accessibilityPotential": 15
+    },
+    "candidates": [
+      {
+        "file": "north-star/01-porcelain-jade-selected.png",
+        "score": 94,
+        "selected": true,
+        "sha256": "5ae1134c91a1bdf50ca57cf3d16c598e9ecaad5b83eadefa16043df02aa5fe4a"
+      },
+      {
+        "file": "north-star/02-rice-paper-minimal.png",
+        "score": 89,
+        "selected": false,
+        "sha256": "0a61c2e72fb3802090cef97af94a94662d766676d3bd1dd63903f62e93c971d6"
+      },
+      {
+        "file": "north-star/03-graphite-dark.png",
+        "score": 87,
+        "selected": false,
+        "sha256": "711c3d201d6b7a14714e500df2a4e679adec01a1bcd1fd563f2b10c4d79c1471"
+      }
+    ]
+  },
+  "screens": [
+    {"screenId": "kifu-home", "file": "screens/01-kifu-home.png", "pixelSize": [852, 1846], "theme": "light", "promptId": "screen-01", "status": "approved", "sha256": "c104604c14937f194b47a4302460c07a0a958e4c2fc90a401f3b9047894fd6b6"},
+    {"screenId": "camera-capture", "file": "screens/02-camera-capture.png", "pixelSize": [853, 1844], "theme": "dark-camera", "promptId": "screen-02", "status": "approved", "sha256": "48bb8c8e84a26d727245d95706e04d9aa5ada4c18ba6bb539944c6e772979f25"},
+    {"screenId": "position-correction", "file": "screens/03-position-correction.png", "pixelSize": [853, 1844], "theme": "light", "promptId": "screen-03", "status": "approved", "sha256": "9227d930d3dcd8b9574f1aa838583070ba14e344359dd959a28ee4772726fa02"},
+    {"screenId": "numbered-diagram-correction", "file": "screens/04-numbered-diagram-correction.png", "pixelSize": [853, 1844], "theme": "light", "promptId": "screen-04", "status": "approved", "sha256": "307c56f6a4a268b7f226a3ebce9546742e1fc507e81e407a84052d0008a8dad4"},
+    {"screenId": "recognition-result", "file": "screens/05-recognition-result.png", "pixelSize": [852, 1846], "theme": "light", "promptId": "screen-05", "status": "approved", "sha256": "f915efcf5a8656fde1bbe910cff6736a6c4fd58810f7d0ee4b6b5ae3f50290ad"},
+    {"screenId": "analysis-progress", "file": "screens/06-analysis-progress.png", "pixelSize": [853, 1844], "theme": "light", "promptId": "screen-06", "status": "approved", "sha256": "1787bb255d3ab74e730f34123e8b79892aaca7e4fbff1692a01de2ec923f4f01"},
+    {"screenId": "light-key-moves-review", "file": "screens/07-light-key-moves-review.png", "pixelSize": [853, 1844], "theme": "light", "promptId": "north-star-01", "status": "approved", "sha256": "5ae1134c91a1bdf50ca57cf3d16c598e9ecaad5b83eadefa16043df02aa5fe4a"},
+    {"screenId": "single-game-performance", "file": "screens/08-single-game-performance.png", "pixelSize": [860, 1828], "theme": "light", "promptId": "screen-08-edit-01", "status": "approved", "sha256": "bac475fdf4ac8575fd683c5f68381abf7b2edb6df08cb6124d041ba00d8e102d"},
+    {"screenId": "dark-variation-comparison", "file": "screens/09-dark-variation-comparison.png", "pixelSize": [853, 1844], "theme": "dark", "promptId": "screen-09", "status": "approved", "sha256": "924817005f0c562bffc5d9886e98153669c96218bd71326ba147c4ad4bfee190"},
+    {"screenId": "tablet-expanded-review", "file": "screens/10-tablet-expanded-review.png", "pixelSize": [1448, 1086], "theme": "dark", "promptId": "screen-10", "status": "approved", "sha256": "5bda776a1f2253a7dbdabf2a5ac589ab604d1ddeed7f51a0b9500fde29dc00da"}
+  ],
+  "implementationEvidence": {
+    "capturedAt": "2026-07-11T08:12:00+08:00",
+    "runtime": "Flutter 3.41.6 / iOS 26.4 simulators / iPhone 17 and iPad Pro 13-inch (M5)",
+    "screens": [
+      {"screenId": "kifu-home", "file": "implementation/iphone-17-home.png", "pixelSize": [1206, 2622], "sha256": "c034e14a2f1142d19922148bf07e010487d98e943d40d235f62c94a9fb6ca8e0"},
+      {"screenId": "position-correction", "file": "implementation/iphone-17-position-correction.png", "pixelSize": [1206, 2622], "sha256": "54318ec3444ac2c5c74981e6746841ce0a960fe4ce56408956de4e73c676191c"},
+      {"screenId": "analysis-progress", "file": "implementation/iphone-17-analysis-progress.png", "pixelSize": [1206, 2622], "sha256": "9c8880aa383ccd29ec41835c2c457649997d1a3e03d38c83ff9e4783905bfa60"},
+      {"screenId": "light-key-moves-review", "file": "implementation/iphone-17-key-move.png", "pixelSize": [1206, 2622], "sha256": "185683b1ec70a4d0b5664becfc2fd51a994a7d38db4d5ad921fce06d7403c38f"},
+      {"screenId": "dark-variation-comparison", "file": "implementation/iphone-17-variation-dark.png", "pixelSize": [1206, 2622], "sha256": "ce6a65f427ce53a1b4129bb0b08d91a41b970b6c2287a5437c047b456604b252"},
+      {"screenId": "tablet-expanded-review", "file": "implementation/ipad-pro-13-review-dark.png", "pixelSize": [2752, 2064], "sha256": "9e56d2b12eb6ec6165c143250f96374c1956bdcfaaee1e7adbed18aae074cd5d"}
+    ]
+  },
+  "implementationPolicy": {
+    "runtimeUse": "visual-reference-only",
+    "canonicalSource": "repository",
+    "allowedDeviations": [
+      "accessibility",
+      "safe-area",
+      "localization",
+      "real-data-length",
+      "platform-convention",
+      "performance"
+    ],
+    "forbidden": [
+      "embedding-screen-raster-as-ui",
+      "glassmorphism",
+      "neon",
+      "heavy-shadow",
+      "desktop-ui-shrink",
+      "color-only-state"
+    ]
+  }
+}

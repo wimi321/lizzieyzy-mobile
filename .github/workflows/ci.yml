@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: 3.41.6
+
+jobs:
+  quality:
+    name: Format, analyze, test, provenance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Resolve locked dependencies
+        run: flutter pub get
+      - name: Verify formatting
+        run: dart format --output=none --set-exit-if-changed lib test
+      - name: Analyze
+        run: flutter analyze --fatal-infos
+      - name: Verify visual benchmark manifest
+        run: python3 .github/scripts/verify_visual_benchmarks.py
+      - name: Verify brand and launcher icons
+        run: python3 .github/scripts/verify_brand_assets.py
+      - name: Run non-golden tests
+        shell: bash
+        run: flutter test $(find test -type f -name '*_test.dart' ! -name 'golden_test.dart' -print | sort)
+
+  android-debug:
+    name: Android debug build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Resolve locked dependencies
+        run: flutter pub get
+      - name: Build debug APK
+        run: flutter build apk --debug
+      - name: Verify merged Android permissions
+        run: .github/scripts/verify_android_permissions.sh
+
+  ios-simulator-and-golden:
+    name: macOS golden and iOS Simulator
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Resolve locked dependencies
+        run: flutter pub get
+      - name: Run macOS visual goldens
+        run: flutter test test/golden_test.dart
+      - name: Build unsigned iOS Simulator app
+        run: flutter build ios --simulator --debug --no-codesign

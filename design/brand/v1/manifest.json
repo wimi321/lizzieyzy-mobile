@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "brandVersion": "1.0.0",
+  "product": "LizzieYZY Mobile",
+  "generatedAt": "2026-07-11T08:20:00+08:00",
+  "generator": "built-in-imagegen",
+  "direction": "porcelain-jade-go-analysis",
+  "rubric": {
+    "goRecognition": 25,
+    "smallSizeLegibility": 25,
+    "distinctiveness": 20,
+    "platformFit": 20,
+    "accessibility": 10
+  },
+  "candidates": [
+    {
+      "file": "candidates/01-seal-grid.png",
+      "score": 88,
+      "selected": false,
+      "sha256": "eb659ea5217073b128442973501557ba87fa0275cb4c4063a11a778687ca04e5"
+    },
+    {
+      "file": "candidates/02-minimal-grid.png",
+      "score": 90,
+      "selected": false,
+      "sha256": "d07c0f07c2a63aa14f51c47378645108d60d72e65d3ea99eb462ef7212bb78c1"
+    },
+    {
+      "file": "candidates/03-bold-analysis-selected.png",
+      "score": 95,
+      "selected": true,
+      "sha256": "5cd650963a35f19cf7c61834c6ce046a3ce105599a33c5064afd49ee4aa18896"
+    }
+  ],
+  "source": {
+    "file": "app-icon-source.png",
+    "pixelSize": [1024, 1024],
+    "sha256": "52261b68aafe6d19ec2e187fd34497a4a4ae8a0a292b3bf977048a1a34b8474e"
+  },
+  "platformGeneration": "tool/generate_app_icons.sh"
+}

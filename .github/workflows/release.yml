@@ -204,7 +204,8 @@ jobs:
         run: flutter pub get
       - name: Prepare pinned CocoaPods toolchain
         run: |
-          bundle binstubs cocoapods --path build/bundle-bin
+          bundle config set --local bin build/bundle-bin
+          bundle binstubs cocoapods
           echo "$PWD/build/bundle-bin" >> "$GITHUB_PATH"
           build/bundle-bin/pod --version
           build/bundle-bin/pod install --project-directory=ios

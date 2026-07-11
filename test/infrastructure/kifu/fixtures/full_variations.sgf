@@ -1,0 +1,9 @@
+(
+;FF[4]GM[1]SZ[19]CA[UTF-8]
+PB[黑\]棋]PW[白棋]BR[3d]WR[1d]
+KM[6.5]RU[Japanese]RE[B+R]DT[2026-07-11]EV[测试赛]
+C[根节点注释]
+;B[pd]C[第一手]
+(;W[dd]C[主变化])
+(;W[dp]C[备选变化])
+)

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 私密安全漏洞报告
+    url: https://github.com/wimi321/lizzieyzy-mobile/security/advisories/new
+    about: 不要公开披露漏洞、密钥或私人样本。
+  - name: LizzieYZY 桌面版问题
+    url: https://github.com/wimi321/lizzieyzy-next/issues
+    about: 仅桌面 Java 应用的问题请提交到 GPL 桌面仓库。

@@ -1,0 +1,71 @@
+name: 缺陷报告
+description: 报告可复现的应用、解析、识谱、复盘或无障碍问题
+title: "[Bug] "
+labels: [bug, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        安全漏洞请使用仓库的私密 Security Advisory，不要在此提交密钥、私人棋谱、原始照片或可利用细节。
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: Commit SHA、预览版本或构建号。
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 环境
+      description: 设备、iOS/Android 版本、屏幕逻辑尺寸和系统字号。
+      placeholder: Pixel 6 / Android 15 / 412×915 / 字号 130%
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: 范围
+      options:
+        - 棋谱导入导出
+        - 拍照识谱与校对
+        - 复盘与变化比较
+        - 单局棋力区间
+        - UI 与无障碍
+        - 构建、CI 或文档
+        - 其他
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 最小复现步骤
+      description: 使用脱敏或合成数据，逐步说明操作。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期结果
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际结果
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 脱敏证据
+      description: 日志、截图或最小棋谱；先删除账号、路径、IP、令牌、EXIF 和私人内容。
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交确认
+      options:
+        - label: 我已搜索现有 issue 和 pull request。
+          required: true
+        - label: 此报告不包含漏洞利用细节、密钥或未经同意的私人数据。
+          required: true

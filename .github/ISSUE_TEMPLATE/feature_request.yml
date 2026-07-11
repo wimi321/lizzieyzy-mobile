@@ -1,0 +1,51 @@
+name: 功能建议
+description: 提议符合移动端专业复盘定位的能力或设计改进
+title: "[Feature] "
+labels: [enhancement, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        v1 不做在线对弈、社交、自然语言棋评、自动出题、永久棋力档案或录像记谱。重大接口、依赖、模型和视觉方向请先讨论再实现。
+  - type: textarea
+    id: problem
+    attributes:
+      label: 用户问题
+      description: 描述任务和证据，不要先给实现方案。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议结果
+      description: 说明用户如何完成任务、失败时如何降级。
+    validations:
+      required: true
+  - type: textarea
+    id: single_screen
+    attributes:
+      label: 单屏与无障碍
+      description: 手机核心操作如何在单屏通过模式切换完成，并兼容大字号和读屏。
+    validations:
+      required: true
+  - type: textarea
+    id: provenance
+    attributes:
+      label: 公开参考与来源
+      description: 列出公开规范、黑盒产品行为、数据、模型、资产及许可；不得粘贴 GPL 源码。
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 可验证验收标准
+      description: 给出正确性、性能、可用性或视觉测试方式。
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交确认
+      options:
+        - label: 我已搜索路线图、现有 issue 和 pull request。
+          required: true
+        - label: 建议不依赖复制第三方视觉、代码或无权分发的数据。
+          required: true

@@ -1,6 +1,6 @@
 # 第三方依赖与通知
 
-本文件是当前直接依赖和重要原生边界的人工审查摘要。精确解析版本以 `pubspec.lock`、`ios/Podfile.lock`、Android release runtime graph 和 `tool/katago_bridge/requirements.lock` 为准；它不替代上游完整许可证、自动生成的 CycloneDX SBOM 或发布产物中的完整许可文本。
+本文件是当前直接依赖和重要原生边界的人工审查摘要。精确解析版本以 `pubspec.lock`、`ios/Podfile.lock`、Android release runtime graph 和 `tool/katago_bridge/requirements.lock` 为准；iOS 构建工具另由 `.ruby-version` 与 `Gemfile.lock` 固定。它不替代上游完整许可证、自动生成的 CycloneDX SBOM 或发布产物中的完整许可文本。
 
 ## 仅测试使用的 golden 字体
 

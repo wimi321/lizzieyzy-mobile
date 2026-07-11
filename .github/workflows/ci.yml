@@ -170,8 +170,12 @@ jobs:
             build/sbom/THIRD_PARTY_LICENSES.txt
             build/sbom/android-release-symbols.zip
             build/sbom/android-release-symbols.json
+            .ruby-version
+            Gemfile
+            Gemfile.lock
             tool/katago_bridge/requirements.lock
             tool/katago_bridge/LICENSES/websockets-BSD-3-Clause.txt
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 30
 
@@ -183,6 +187,10 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           persist-credentials: false
+      - uses: ruby/setup-ruby@d45b1a4e94b71acab930e56e79c6aa188764e7f9 # v1
+        with:
+          ruby-version: '3.3.11'
+          bundler-cache: true
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
@@ -190,6 +198,12 @@ jobs:
           cache: true
       - name: Resolve locked dependencies
         run: flutter pub get
+      - name: Prepare pinned CocoaPods toolchain
+        run: |
+          bundle binstubs cocoapods --path build/bundle-bin
+          echo "$PWD/build/bundle-bin" >> "$GITHUB_PATH"
+          build/bundle-bin/pod --version
+          build/bundle-bin/pod install --project-directory=ios
       - name: Run macOS visual goldens
         run: flutter test test/golden_test.dart
       - name: Build unsigned iOS device release

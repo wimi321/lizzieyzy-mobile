@@ -191,6 +191,10 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           persist-credentials: false
+      - uses: ruby/setup-ruby@d45b1a4e94b71acab930e56e79c6aa188764e7f9 # v1
+        with:
+          ruby-version: '3.3.11'
+          bundler-cache: true
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
@@ -198,6 +202,12 @@ jobs:
           cache: true
       - name: Resolve locked dependencies
         run: flutter pub get
+      - name: Prepare pinned CocoaPods toolchain
+        run: |
+          bundle binstubs cocoapods --path build/bundle-bin
+          echo "$PWD/build/bundle-bin" >> "$GITHUB_PATH"
+          build/bundle-bin/pod --version
+          build/bundle-bin/pod install --project-directory=ios
       - name: Require reproducible Pub lockfile
         run: git diff --exit-code -- pubspec.lock
       - name: Rerun approved macOS visual goldens
@@ -240,6 +250,8 @@ jobs:
             build/release-evidence/LizzieYZY-Mobile-ios-unsigned.zip
           cp assets/legal/cocoapods_third_party_licenses.txt build/release-evidence/
           cp ios/Podfile.lock build/release-evidence/Podfile.lock
+          cp .ruby-version build/release-evidence/ruby-version.txt
+          cp Gemfile Gemfile.lock build/release-evidence/
           python3 tool/release_evidence.py hash \
             --output build/release-evidence/ios-candidate-digest.json \
             --artifact ios-unsigned-app=build/release-evidence/LizzieYZY-Mobile-ios-unsigned.zip
@@ -324,6 +336,9 @@ jobs:
           cmp assets/legal/cocoapods_third_party_licenses.txt \
             build/evidence/ios/cocoapods_third_party_licenses.txt
           cmp ios/Podfile.lock build/evidence/ios/Podfile.lock
+          cmp .ruby-version build/evidence/ios/ruby-version.txt
+          cmp Gemfile build/evidence/ios/Gemfile
+          cmp Gemfile.lock build/evidence/ios/Gemfile.lock
       - name: Verify GitHub-signed build provenance for both exact candidates
         env:
           GH_TOKEN: ${{ github.token }}
@@ -376,6 +391,9 @@ jobs:
           --evidence gradlew=android/gradlew
           --evidence gradlew-bat=android/gradlew.bat
           --evidence pod-lock=ios/Podfile.lock
+          --evidence ruby-version=.ruby-version
+          --evidence cocoapods-gemfile=Gemfile
+          --evidence cocoapods-gem-lock=Gemfile.lock
           --evidence bridge-lock=tool/katago_bridge/requirements.lock
           --evidence bridge-license=tool/katago_bridge/LICENSES/websockets-BSD-3-Clause.txt
           --evidence android-symbols=build/evidence/android/android-release-symbols.zip
@@ -392,6 +410,7 @@ jobs:
             build/final-evidence/contents/compliance \
             build/final-evidence/contents/locks/gradle \
             build/final-evidence/contents/locks/cocoapods \
+            build/final-evidence/contents/locks/ruby \
             build/final-evidence/contents/locks/python
           cp \
             build/evidence/android/LizzieYZY-Mobile-android-unsigned.apk \
@@ -425,6 +444,9 @@ jobs:
             android/gradle/wrapper/gradle-wrapper-integrity.json \
             build/final-evidence/contents/locks/gradle/
           cp ios/Podfile.lock build/final-evidence/contents/locks/cocoapods/
+          cp .ruby-version \
+            build/final-evidence/contents/locks/ruby/ruby-version.txt
+          cp Gemfile Gemfile.lock build/final-evidence/contents/locks/ruby/
           cp \
             tool/katago_bridge/requirements.lock \
             tool/katago_bridge/LICENSES/websockets-BSD-3-Clause.txt \

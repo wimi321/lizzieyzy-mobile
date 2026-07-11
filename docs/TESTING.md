@@ -4,6 +4,7 @@
 
 - Flutter 3.41.6 stable
 - Dart 3.11.4（随上述 Flutter 提供）
+- iOS 依赖生成固定 Ruby 3.3.11、Bundler 4.0.11 与 CocoaPods 1.16.2；不得用其他 Ruby 重写 `Podfile.lock`
 - Android 构建使用 Java 17，当前 `minSdk` 为 API 29
 - 桌面 KataGo 桥使用 Ubuntu 24.04 / Python 3.12；依赖只能从带 SHA-256 的 `requirements.lock` 安装
 - macOS CI 与 release-readiness 均做 iOS 17 device `--release --no-codesign` 编译；不签名、不归档、不产生可发布安装包
@@ -15,6 +16,8 @@ Flutter patch 版本或宿主字体栈不同都可能造成 golden 漂移。视�
 
 ```bash
 flutter pub get
+bundle install
+bundle exec pod install --project-directory=ios
 dart format --output=none --set-exit-if-changed lib test
 flutter analyze --fatal-infos
 python3 .github/scripts/verify_visual_benchmarks.py

@@ -1,21 +1,21 @@
 LizzieYZY Mobile CocoaPods licenses and notices
 Generated from the locked Podfile.lock and CocoaPods acknowledgements.
-Podfile.lock SHA-256: dfa8cdb003d4a84f3e3f82aa4cef08b9ee182e638e7bed2d4651db534f1715f8
+Podfile.lock SHA-256: cb0ad4dcd236be4b7743a3f8566deaf81a54a9a1e964761dbf4fe3d144828fd9
 
 Resolved pod inventory
 ----------------------
-- camera_avfoundation | podspec SHA-1 968a9a5323c79a99c166ad9d7866bfd2047b5a9b
-- file_selector_ios | podspec SHA-1 ec57ec07954363dd730b642e765e58f199bb621a
+- camera_avfoundation | podspec SHA-1 769d252259fa21e39ada7399c9dc9c0921af8165
+- file_selector_ios | podspec SHA-1 80c12e90ad3f2045ed6819d03742f1a4c5ec3f93
 - Flutter | podspec SHA-1 cabc95a1d2626b1b06e7179b784ebcf0c0cde467
-- flutter_secure_storage_darwin | podspec SHA-1 acdb3f316ed05a3e68f856e0353b133eec373a23
-- google_mlkit_commons | podspec SHA-1 b4dfe2f6ae4cbf24010dc6640a28984d01343c86
-- google_mlkit_text_recognition | podspec SHA-1 9b164471713e3afdb4c129cabe6d1d64fef7e817
+- flutter_secure_storage_darwin | podspec SHA-1 557817588b80e60213cbecb573c45c76b788018d
+- google_mlkit_commons | podspec SHA-1 75b2579ccf522fe01d42e689babda04c4510ba2f
+- google_mlkit_text_recognition | podspec SHA-1 4d510169638309ef7ed2aff1971b620e8d785d6e
 - GoogleDataTransport | podspec SHA-1 aae35b7ea0c09004c3797d53c8c41f66f219d6a7
 - GoogleMLKit | podspec SHA-1 b1eee21a41c57704fe72483b15c85cb2c0cd7444
 - GoogleToolboxForMac | podspec SHA-1 d1a2cbf009c453f4d6ded37c105e2f67a32206d8
 - GoogleUtilities | podspec SHA-1 766ace00c6b10d8148408f329d10c4f051931850
 - GTMSessionFetcher | podspec SHA-1 5aea5ba6bd522a239e236100971f10cb71b96ab6
-- image_picker_ios | podspec SHA-1 e0ece4aa2a75771a7de3fa735d26d90817041326
+- image_picker_ios | podspec SHA-1 4f2f91b01abdb52842a8e277617df877e40f905b
 - MLImage | podspec SHA-1 0de5c6c2bf9e93b80ef752e2797f0836f03b58c0
 - MLKitCommon | podspec SHA-1 47d47b50a031d00db62f1b0efe5a1d8b09a3b2e6
 - MLKitTextRecognition | podspec SHA-1 c0ad24510481dfc8893ad15dfcb8a5f05ed9e826
@@ -23,8 +23,8 @@ Resolved pod inventory
 - MLKitVision | podspec SHA-1 39a5a812db83c4a0794445088e567f3631c11961
 - nanopb | podspec SHA-1 fad817b59e0457d11a5dfbde799381cd727c1275
 - PromisesObjC | podspec SHA-1 752c3227f599e3467650e47ea36f433eeb10c273
-- share_plus | podspec SHA-1 50da8cb520a8f0f65671c6c6a99b3617ed10a58a
-- shared_preferences_foundation | podspec SHA-1 7036424c3d8ec98dfe75ff1667cb0cd531ec82bb
+- share_plus | podspec SHA-1 8b6f8b3447e494cca5317c8c3073de39b3600d1f
+- shared_preferences_foundation | podspec SHA-1 5086985c1d43c5ba4d5e69a4e8083a389e2909e6
 
 Full CocoaPods acknowledgements
 -------------------------------

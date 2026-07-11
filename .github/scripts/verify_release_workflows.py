@@ -65,6 +65,15 @@ def main() -> int:
         ):
             if required not in ci:
                 fail(f"CI Android release contract omits {required}")
+        for workflow_name, workflow in (("CI", ci), ("release", release)):
+            for required in (
+                "ruby-version: '3.3.11'",
+                "bundler-cache: true",
+                "bundle binstubs cocoapods",
+                "pod install --project-directory=ios",
+            ):
+                if required not in workflow:
+                    fail(f"{workflow_name} iOS toolchain contract omits {required}")
         if "--obfuscate" in ci or "--obfuscate" in release:
             fail("open-source release candidates must remain Dart-auditable")
 
@@ -89,6 +98,8 @@ def main() -> int:
             "LizzieYZY-Mobile-release-evidence.zip",
             "predicate-type: ${{ env.INTEGRITY_PREDICATE_TYPE }}",
             "predicate-path: build/sbom/release-integrity-predicate.json",
+            "--evidence cocoapods-gem-lock=Gemfile.lock",
+            "contents/locks/ruby",
         ):
             if required not in release:
                 fail(f"release evidence contract omits {required}")

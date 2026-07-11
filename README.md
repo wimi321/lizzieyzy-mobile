@@ -86,11 +86,13 @@ flutter test $(find test -type f -name '*_test.dart' ! -name 'golden_test.dart' 
 flutter test test/golden_test.dart              # 使用批准基线的 macOS 环境
 flutter build apk --release \
   --split-debug-info=build/symbols/android
+bundle install                                  # Ruby 3.3.11 / Bundler 4.0.11
+bundle exec pod install --project-directory=ios
 flutter build ios --release --no-codesign \
   --split-debug-info=build/symbols/ios           # iOS device，不产生签名包
 ```
 
-CI 工作流固定 Flutter 3.41.6，并在 Ubuntu 24.04 / Python 3.12 用 `--require-hashes` 安装桌面桥依赖、编译全部 Python 文件并运行桥接测试；同时配置格式、分析、Flutter 测试、视觉/品牌/隐私/fixture/许可 guards、Android release 最终包门禁与 iOS 构建。tag release-readiness 要求 tag 精确等于 `v<pubspec version>`（包含 `+build`），复跑 macOS golden，保留 Android R8/native/Flutter symbols 与 UUID 匹配的全部 iOS dSYM，并生成四生态 CycloneDX SBOM、完整许可、checksums 和带自定义完整性签名的确定性证据包。该自定义声明明确不是 SLSA build provenance。工作流配置不等于对应 GitHub Actions job 已通过；即使 CI 全绿，也不等于真实手机 ↔ 桌面 GPU、真机、签名或商店审核通过。完整说明见[测试指南](docs/TESTING.md)与[发布证据规范](docs/RELEASE_EVIDENCE.md)。
+CI 工作流固定 Flutter 3.41.6、Ruby 3.3.11、CocoaPods 1.16.2，并在 Ubuntu 24.04 / Python 3.12 用 `--require-hashes` 安装桌面桥依赖、编译全部 Python 文件并运行桥接测试；同时配置格式、分析、Flutter 测试、视觉/品牌/隐私/fixture/许可 guards、Android release 最终包门禁与 iOS 构建。tag release-readiness 要求 tag 精确等于 `v<pubspec version>`（包含 `+build`），复跑 macOS golden，保留 Android R8/native/Flutter symbols 与 UUID 匹配的全部 iOS dSYM，并生成四生态 CycloneDX SBOM、完整许可、checksums 和带自定义完整性签名的确定性证据包。该自定义声明明确不是 SLSA build provenance。工作流配置不等于对应 GitHub Actions job 已通过；即使 CI 全绿，也不等于真实手机 ↔ 桌面 GPU、真机、签名或商店审核通过。完整说明见[测试指南](docs/TESTING.md)与[发布证据规范](docs/RELEASE_EVIDENCE.md)。
 
 发布隐私事实见[隐私政策](PRIVACY.md)与 [Android Data Safety 工作底稿](docs/ANDROID_DATA_SAFETY.md)。生成完整候选 SBOM：
 

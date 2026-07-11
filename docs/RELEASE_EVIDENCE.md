@@ -39,7 +39,7 @@ iOS 候选同时保存 Flutter split-debug-info 和 `build/ios/Release-iphoneos`
 - 两个平台的原始无签名候选、候选摘要和 GitHub build-provenance Sigstore bundle；
 - Android/iOS symbol archive 与逐文件 manifest；
 - 四生态 CycloneDX SBOM、完整第三方许可文本和候选摘要；
-- Gradle wrapper/verification lock、Podfile.lock、Python requirements lock；
+- Gradle wrapper/verification lock、Podfile.lock、Ruby/CocoaPods Gemfile.lock、Python requirements lock；
 - 自定义 release-integrity predicate；
 - 覆盖包内全部内容（不自包含）的 `checksums.sha256`。
 

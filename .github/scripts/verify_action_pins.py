@@ -18,6 +18,7 @@ REVIEWED = {
     "actions/download-artifact": "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
     "actions/setup-java": "0f481fcb613427c0f801b606911222b5b6f3083a",
     "actions/upload-artifact": "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+    "ruby/setup-ruby": "d45b1a4e94b71acab930e56e79c6aa188764e7f9",
     "subosito/flutter-action": "1a449444c387b1966244ae4d4f8c696479add0b2",
 }
 

@@ -1,16 +1,30 @@
 import 'dart:math' as math;
-import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
+import 'package:lizzieyzy_mobile/application/kifu_workspace.dart';
 import 'package:lizzieyzy_mobile/application/scan/scan.dart';
 import 'package:lizzieyzy_mobile/design_system/design_system.dart';
 import 'package:lizzieyzy_mobile/domain/domain.dart' as domain;
+import 'package:lizzieyzy_mobile/infrastructure/kifu/kifu.dart';
+import 'package:lizzieyzy_mobile/l10n/l10n.dart';
 
 import '../../../app/app_routes.dart';
 import '../../common/presentation/feature_chrome.dart';
-import '../../fixtures/ui_fixtures.dart';
 
 enum _CorrectionChoice { black, white, empty, uncertain }
+
+enum _SequenceIssueKind {
+  noFirst,
+  missing,
+  ocr,
+  color,
+  finalMismatch,
+  tooMany,
+  duplicate,
+  illegal,
+  failed,
+}
 
 class PhysicalBoardCorrectionScreen extends StatefulWidget {
   const PhysicalBoardCorrectionScreen({super.key, this.capture});
@@ -25,19 +39,183 @@ class PhysicalBoardCorrectionScreen extends StatefulWidget {
 class _PhysicalBoardCorrectionScreenState
     extends State<PhysicalBoardCorrectionScreen> {
   _CorrectionChoice _selected = _CorrectionChoice.black;
-  late final ScanCapturePayload _capture = widget.capture ?? _fixtureCapture();
-  late final Map<domain.BoardPoint, domain.StoneColor> _stones =
-      _stonesFromDraft(_capture.draft);
-  late final Set<domain.BoardPoint> _pending = <domain.BoardPoint>{
-    for (final prediction in _capture.draft.intersections)
-      if (prediction.confidence < 0.9) prediction.point,
-  };
-  late domain.BoardPoint? _selectedPoint = _pending.firstOrNull;
+  final Map<domain.BoardPoint, domain.StoneColor> _stones =
+      <domain.BoardPoint, domain.StoneColor>{};
+  final Set<domain.BoardPoint> _pending = <domain.BoardPoint>{};
+  domain.BoardPoint? _selectedPoint;
+
+  @override
+  void initState() {
+    super.initState();
+    final draft = widget.capture?.draft;
+    if (draft == null) return;
+    _stones.addAll(_stonesFromDraft(draft));
+    final byPoint = <domain.BoardPoint, domain.IntersectionPrediction>{
+      for (final prediction in draft.intersections)
+        prediction.point: prediction,
+    };
+    for (var row = 0; row < draft.boardSize.dimension; row++) {
+      for (var column = 0; column < draft.boardSize.dimension; column++) {
+        final point = domain.BoardPoint(column, row);
+        final prediction = byPoint[point];
+        if (prediction == null || prediction.confidence < 0.9) {
+          _pending.add(point);
+        }
+      }
+    }
+    _selectedPoint = _pending.firstOrNull;
+  }
 
   int get _blackCount =>
       _stones.values.where((stone) => stone == domain.StoneColor.black).length;
   int get _whiteCount =>
       _stones.values.where((stone) => stone == domain.StoneColor.white).length;
+
+  @override
+  Widget build(BuildContext context) {
+    final capture = widget.capture;
+    if (capture == null) {
+      return _MissingCorrectionData(title: context.l10n.boardCorrectionExpired);
+    }
+    final l10n = context.l10n;
+    final largeText = MediaQuery.textScalerOf(context).scale(1) >= 1.6;
+    return Scaffold(
+      body: Column(
+        children: <Widget>[
+          FeatureTopBar(
+            title: l10n.correctBoardTitle,
+            subtitle: l10n.autoRectifiedSubtitle(
+              l10n.boardDimension(capture.draft.boardSize.dimension),
+            ),
+            leading: const BackCircleButton(),
+            actions: <Widget>[
+              IconButton(
+                tooltip: l10n.viewOriginal,
+                onPressed: _showOriginal,
+                icon: const Icon(Icons.image_outlined),
+              ),
+            ],
+          ),
+          Expanded(
+            child: SafeArea(
+              top: false,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final reserved = largeText ? 250.0 : 220.0;
+                  final side = math.min<double>(
+                    math.min(constraints.maxWidth, 560) - GoSpacing.s8,
+                    math.max<double>(128, constraints.maxHeight - reserved),
+                  );
+                  return Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 560),
+                      child: Padding(
+                        key: const Key('board-correction-viewport'),
+                        padding: const EdgeInsets.fromLTRB(
+                          GoSpacing.s4,
+                          GoSpacing.s1,
+                          GoSpacing.s4,
+                          GoSpacing.s2,
+                        ),
+                        child: Column(
+                          children: <Widget>[
+                            SizedBox.square(
+                              dimension: side,
+                              child: GoBoard(
+                                boardSize: capture.draft.boardSize.dimension,
+                                stones: _uiStones(_stones),
+                                candidates: <BoardCandidate>[
+                                  for (final point in _pending.take(12))
+                                    BoardCandidate(
+                                      point: _uiPoint(point),
+                                      label: '?',
+                                      detail: l10n.pendingLabel,
+                                      tone: CandidateTone.tertiary,
+                                    ),
+                                ],
+                                selectedPoint: _selectedPoint == null
+                                    ? null
+                                    : _uiPoint(_selectedPoint!),
+                                onIntersectionTap: _selectPoint,
+                                semanticLabel: l10n.boardCorrectionSemantics(
+                                  _blackCount,
+                                  _whiteCount,
+                                  _pending.length,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: GoSpacing.s1),
+                            Semantics(
+                              container: true,
+                              explicitChildNodes: true,
+                              liveRegion: true,
+                              label:
+                                  '${l10n.stoneCounts(_blackCount, _whiteCount)}, '
+                                  '${l10n.pendingConfirmation(_pending.length)}'
+                                  '${_selectedPoint == null ? '' : ', ${l10n.intersectionCoordinate(_selectedPoint!.toGtp(capture.draft.boardSize))}'}',
+                              child: Row(
+                                children: <Widget>[
+                                  Expanded(
+                                    child: Text(
+                                      l10n.stoneCountsCompact(
+                                        _blackCount,
+                                        _whiteCount,
+                                      ),
+                                    ),
+                                  ),
+                                  MetricPill(
+                                    label: l10n.pendingLabel,
+                                    value: '${_pending.length}',
+                                    tone: _pending.isEmpty
+                                        ? MetricTone.positive
+                                        : MetricTone.negative,
+                                    compact: true,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: GoSpacing.s1),
+                            SurfacePanel(
+                              padding: const EdgeInsets.all(GoSpacing.s1),
+                              child: Row(
+                                children: <Widget>[
+                                  for (final choice in _CorrectionChoice.values)
+                                    Expanded(
+                                      child: _CorrectionChoiceButton(
+                                        choice: choice,
+                                        selected: choice == _selected,
+                                        onTap: () => _applyChoice(choice),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                            const Spacer(),
+                            SizedBox(
+                              width: double.infinity,
+                              child: FilledButton.icon(
+                                onPressed: _pending.isEmpty ? _finish : null,
+                                icon: const Icon(Icons.check_rounded),
+                                label: Text(
+                                  _pending.isEmpty
+                                      ? l10n.confirmCurrentPosition
+                                      : l10n.confirmRemaining(_pending.length),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   void _selectPoint(BoardPoint point) {
     final selected = domain.BoardPoint(point.x, point.y);
@@ -79,89 +257,104 @@ class _PhysicalBoardCorrectionScreenState
   }
 
   void _finish() {
+    final capture = widget.capture!;
     if (_pending.isNotEmpty) return;
     final snapshot = domain.PositionSnapshot(
-      id: 'scan-${DateTime.now().toUtc().microsecondsSinceEpoch}',
+      id: _scanDocumentId(capture, 'position'),
       position: domain.BoardPosition(
-        size: _capture.draft.boardSize,
+        size: capture.draft.boardSize,
         stones: _stones,
       ),
       rules: const domain.GoRules.chinese(),
-      source: domain.KifuSource(
-        kind: _capture.inputKind == ScanInputKind.camera
-            ? domain.KifuSourceKind.camera
-            : domain.KifuSourceKind.photoLibrary,
-      ),
+      source: _scanSource(capture),
     );
     Navigator.pushNamed(
       context,
       AppRoutes.scanResult,
       arguments: ScanPositionPayload(
         snapshot: snapshot,
-        originalFrame: _capture.originalFrame,
-        draft: _capture.draft,
+        originalFrame: capture.originalFrame,
+        draft: capture.draft,
       ),
     );
   }
 
-  Future<void> _showOriginal() => showDialog<void>(
-    context: context,
-    builder: (context) => Dialog(
-      clipBehavior: Clip.antiAlias,
-      child: SizedBox(
-        width: 520,
-        height: math.min(560, MediaQuery.sizeOf(context).height - 96),
-        child: Column(
-          children: <Widget>[
-            Expanded(
-              child: ColoredBox(
-                color: const Color(0xFF111713),
-                child: Center(
-                  child: Image.memory(
-                    _capture.originalFrame.encodedBytes,
-                    fit: BoxFit.contain,
-                    errorBuilder: (_, _, _) => const Center(
-                      child: Text(
-                        '测试识别图',
-                        style: TextStyle(color: Colors.white),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(GoSpacing.s3),
-              child: Row(
-                children: <Widget>[
-                  const Expanded(child: Text('原始照片')),
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('关闭'),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    ),
-  );
+  Future<void> _showOriginal() =>
+      _showOriginalFrame(context, widget.capture!.originalFrame);
+}
+
+class NumberedKifuCorrectionScreen extends StatefulWidget {
+  const NumberedKifuCorrectionScreen({
+    super.key,
+    this.capture,
+    this.solver = const RuleCheckedSequenceSolver(),
+  });
+
+  final ScanCapturePayload? capture;
+  final domain.SequenceSolver solver;
+
+  @override
+  State<NumberedKifuCorrectionScreen> createState() =>
+      _NumberedKifuCorrectionScreenState();
+}
+
+class _NumberedKifuCorrectionScreenState
+    extends State<NumberedKifuCorrectionScreen> {
+  final Map<int, domain.SequenceToken> _tokens = <int, domain.SequenceToken>{};
+  domain.BoardPoint? _selectedPoint;
+  int? _issueNumber;
+  _SequenceIssueKind? _issueKind;
+  bool _reuseSamePoint = false;
+  bool _validating = false;
+  bool _saving = false;
+  domain.VerifiedGameRecord? _verified;
+
+  @override
+  void initState() {
+    super.initState();
+    final capture = widget.capture;
+    if (capture == null) return;
+    for (final token in capture.draft.sequenceTokens) {
+      _tokens[token.moveNumber] = token;
+    }
+    _setNextIssue();
+    if (_issueNumber == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _validateSequence());
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final capture = widget.capture;
+    if (capture == null) {
+      return _MissingCorrectionData(
+        title: context.l10n.sequenceCorrectionExpired,
+      );
+    }
+    final l10n = context.l10n;
+    if (_verified case final record?) {
+      return _NumberedVerifiedView(
+        record: record,
+        saving: _saving,
+        onContinue: _saveAndAnalyze,
+      );
+    }
+    final finalStones = _stonesFromDraft(capture.draft);
+    final issue = _issueNumber;
+    final largeText = MediaQuery.textScalerOf(context).scale(1) >= 1.6;
+    final numberedStones = _numberedStones(finalStones);
     return Scaffold(
       body: Column(
         children: <Widget>[
           FeatureTopBar(
-            title: '校对棋盘',
-            subtitle: '自动拉正 · ${_capture.draft.boardSize.dimension}路',
+            title: l10n.correctSequenceTitle,
+            subtitle: l10n.numberedDetectedMoves(_tokens.length),
             leading: const BackCircleButton(),
             actions: <Widget>[
               IconButton(
-                tooltip: '查看原图',
-                onPressed: _showOriginal,
+                tooltip: l10n.viewOriginal,
+                onPressed: () =>
+                    _showOriginalFrame(context, capture.originalFrame),
                 icon: const Icon(Icons.image_outlined),
               ),
             ],
@@ -171,140 +364,105 @@ class _PhysicalBoardCorrectionScreenState
               top: false,
               child: LayoutBuilder(
                 builder: (context, constraints) {
-                  final boardSide = math.min(
-                    math.min(constraints.maxWidth, 560.0) - GoSpacing.s8,
-                    math.max(180.0, constraints.maxHeight - 220.0),
+                  final reserved = largeText ? 330.0 : 306.0;
+                  final side = math.min<double>(
+                    math.min(constraints.maxWidth, 520) - GoSpacing.s8,
+                    math.max<double>(120, constraints.maxHeight - reserved),
                   );
                   return Center(
                     child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 560),
+                      constraints: const BoxConstraints(maxWidth: 520),
                       child: Padding(
-                        key: const Key('board-correction-scroll'),
+                        key: const Key('numbered-correction-viewport'),
                         padding: const EdgeInsets.fromLTRB(
                           GoSpacing.s4,
                           GoSpacing.s1,
                           GoSpacing.s4,
-                          GoSpacing.s3,
+                          GoSpacing.s2,
                         ),
                         child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: <Widget>[
-                            Center(
-                              child: SizedBox.square(
-                                dimension: boardSide,
-                                child: GoBoard(
-                                  boardSize: _capture.draft.boardSize.dimension,
-                                  stones: <BoardStone>[
-                                    for (final entry in _stones.entries)
-                                      BoardStone(
-                                        point: BoardPoint(
-                                          entry.key.column,
-                                          entry.key.row,
-                                        ),
-                                        color:
-                                            entry.value ==
-                                                domain.StoneColor.black
-                                            ? StoneColor.black
-                                            : StoneColor.white,
-                                      ),
-                                  ],
-                                  candidates: <BoardCandidate>[
-                                    for (final point in _pending.take(12))
-                                      BoardCandidate(
-                                        point: BoardPoint(
-                                          point.column,
-                                          point.row,
-                                        ),
-                                        label: '?',
-                                        detail: '待确认',
-                                        tone: CandidateTone.tertiary,
-                                      ),
-                                  ],
-                                  selectedPoint: _selectedPoint == null
-                                      ? null
-                                      : BoardPoint(
-                                          _selectedPoint!.column,
-                                          _selectedPoint!.row,
-                                        ),
-                                  onIntersectionTap: _selectPoint,
-                                  semanticLabel:
-                                      '实体棋盘识别校对，黑$_blackCount子，白$_whiteCount子，当前有${_pending.length}个交叉点待确认',
+                            SizedBox.square(
+                              dimension: side,
+                              child: GoBoard(
+                                boardSize: capture.draft.boardSize.dimension,
+                                stones: numberedStones,
+                                selectedPoint: _selectedPoint == null
+                                    ? null
+                                    : _uiPoint(_selectedPoint!),
+                                onIntersectionTap: (point) => setState(
+                                  () => _selectedPoint = domain.BoardPoint(
+                                    point.x,
+                                    point.y,
+                                  ),
                                 ),
+                                semanticLabel: issue == null
+                                    ? l10n.sequenceValidatingSemantics
+                                    : l10n.sequenceIssueSemantics(issue),
                               ),
                             ),
-                            const SizedBox(height: GoSpacing.s2),
-                            Row(
-                              children: <Widget>[
-                                Expanded(
-                                  child: Text(
-                                    '黑 $_blackCount  ·  白 $_whiteCount',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: theme.textTheme.bodyMedium,
-                                  ),
-                                ),
-                                const SizedBox(width: GoSpacing.s2),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: GoSpacing.s3,
-                                    vertical: GoSpacing.s2,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: _pending.isEmpty
-                                        ? theme.colorScheme.primaryContainer
-                                        : theme.colorScheme.errorContainer,
-                                    borderRadius: BorderRadius.circular(
-                                      GoRadii.pill,
+                            const SizedBox(height: GoSpacing.s1),
+                            _SequenceIssuePanel(
+                              moveNumber: issue,
+                              detail: _sequenceIssueDetail(l10n, _issueKind),
+                              validating: _validating,
+                            ),
+                            const SizedBox(height: GoSpacing.s1),
+                            if (issue != null) ...<Widget>[
+                              Row(
+                                children: <Widget>[
+                                  Expanded(
+                                    child: ChoiceChip(
+                                      selected: _reuseSamePoint,
+                                      avatar: const Icon(
+                                        Icons.undo_rounded,
+                                        size: 18,
+                                      ),
+                                      label: SizedBox(
+                                        width: double.infinity,
+                                        child: Text(
+                                          l10n.reuseAfterCapture,
+                                          textAlign: TextAlign.center,
+                                        ),
+                                      ),
+                                      onSelected: (value) => setState(
+                                        () => _reuseSamePoint = value,
+                                      ),
                                     ),
                                   ),
+                                  const SizedBox(width: GoSpacing.s1),
+                                  Expanded(
+                                    child: OutlinedButton(
+                                      onPressed: () => _assignIssue(pass: true),
+                                      child: Text(l10n.markPassMove),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: GoSpacing.s1),
+                              SizedBox(
+                                width: double.infinity,
+                                child: FilledButton(
+                                  onPressed: _selectedPoint == null
+                                      ? null
+                                      : () => _assignIssue(pass: false),
                                   child: Text(
-                                    '待确认 ${_pending.length}',
-                                    style: theme.textTheme.labelMedium
-                                        ?.copyWith(
-                                          color: _pending.isEmpty
-                                              ? theme
-                                                    .colorScheme
-                                                    .onPrimaryContainer
-                                              : theme
-                                                    .colorScheme
-                                                    .onErrorContainer,
-                                        ),
+                                    _selectedPoint == null
+                                        ? l10n.selectMoveOnBoard(issue)
+                                        : l10n.confirmMoveAt(
+                                            issue,
+                                            _selectedPoint!.toGtp(
+                                              capture.draft.boardSize,
+                                            ),
+                                          ),
                                   ),
                                 ),
-                              ],
-                            ),
-                            const SizedBox(height: GoSpacing.s2),
-                            SurfacePanel(
-                              padding: const EdgeInsets.all(GoSpacing.s2),
-                              child: Row(
-                                children: _CorrectionChoice.values
-                                    .map(
-                                      (choice) => Expanded(
-                                        child: Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 2,
-                                          ),
-                                          child: _CorrectionChoiceButton(
-                                            choice: choice,
-                                            selected: choice == _selected,
-                                            onTap: () => _applyChoice(choice),
-                                          ),
-                                        ),
-                                      ),
-                                    )
-                                    .toList(growable: false),
                               ),
-                            ),
+                            ],
                             const Spacer(),
-                            const SizedBox(height: GoSpacing.s3),
-                            FilledButton.icon(
-                              onPressed: _pending.isEmpty ? _finish : null,
-                              icon: const Icon(Icons.check_rounded),
-                              label: Text(
-                                _pending.isEmpty
-                                    ? '确认当前局面'
-                                    : '请先确认 ${_pending.length} 处',
-                              ),
+                            TextButton(
+                              onPressed: _saveAsPosition,
+                              child: Text(l10n.saveAsPositionFallback),
                             ),
                           ],
                         ),
@@ -319,99 +477,336 @@ class _PhysicalBoardCorrectionScreenState
       ),
     );
   }
-}
 
-ScanCapturePayload _fixtureCapture() {
-  final fixtureStones = <domain.BoardPoint, domain.StoneColor>{
-    for (final stone in UiFixtures.stones)
-      domain.BoardPoint(
-        stone.point.x,
-        stone.point.y,
-      ): stone.color == StoneColor.black
+  List<BoardStone> _numberedStones(
+    Map<domain.BoardPoint, domain.StoneColor> finalStones,
+  ) {
+    final latestAtPoint = <domain.BoardPoint, int>{};
+    for (final token in _tokens.values) {
+      final point = token.move.point;
+      if (point != null &&
+          (latestAtPoint[point] == null ||
+              token.moveNumber > latestAtPoint[point]!)) {
+        latestAtPoint[point] = token.moveNumber;
+      }
+    }
+    return <BoardStone>[
+      for (final entry in finalStones.entries)
+        BoardStone(
+          point: _uiPoint(entry.key),
+          color: entry.value == domain.StoneColor.black
+              ? StoneColor.black
+              : StoneColor.white,
+          moveNumber: latestAtPoint[entry.key],
+        ),
+    ];
+  }
+
+  void _setNextIssue() {
+    if (_tokens.isEmpty) {
+      _issueNumber = 1;
+      _issueKind = _SequenceIssueKind.noFirst;
+      return;
+    }
+    final maximum = _tokens.keys.reduce(math.max);
+    for (var number = 1; number <= maximum; number++) {
+      final token = _tokens[number];
+      final expectedColor = number.isOdd
           ? domain.StoneColor.black
-          : domain.StoneColor.white,
-  };
-  final pending = <domain.BoardPoint>{
-    const domain.BoardPoint(7, 7),
-    const domain.BoardPoint(12, 13),
-  };
-  final draft = domain.ScanDraft(
-    kind: domain.ScanKind.physicalBoard,
-    boardSize: domain.BoardSize.nineteen,
-    boardBounds: const domain.BoardQuadrilateral(
-      topLeft: domain.NormalizedPoint(0.05, 0.05),
-      topRight: domain.NormalizedPoint(0.95, 0.05),
-      bottomRight: domain.NormalizedPoint(0.95, 0.95),
-      bottomLeft: domain.NormalizedPoint(0.05, 0.95),
-    ),
-    intersections: <domain.IntersectionPrediction>[
-      for (var row = 0; row < 19; row++)
-        for (var column = 0; column < 19; column++)
-          _fixturePrediction(
-            domain.BoardPoint(column, row),
-            fixtureStones[domain.BoardPoint(column, row)],
-            pending.contains(domain.BoardPoint(column, row)),
-          ),
-    ],
-    boardConfidence: 0.94,
-  );
-  return ScanCapturePayload(
-    draft: draft,
-    originalFrame: domain.CapturedFrame(
-      encodedBytes: Uint8List.fromList(<int>[0]),
-      pixelWidth: 1,
-      pixelHeight: 1,
-      capturedAt: DateTime.utc(2026, 7, 11),
-    ),
-    inputKind: ScanInputKind.camera,
-    usedBurst: true,
-  );
-}
+          : domain.StoneColor.white;
+      if (token == null) {
+        _issueNumber = number;
+        _issueKind = _SequenceIssueKind.missing;
+        _selectedPoint = null;
+        return;
+      }
+      if (token.confidence < 0.9 || token.move.color != expectedColor) {
+        _issueNumber = number;
+        _issueKind = token.confidence < 0.9
+            ? _SequenceIssueKind.ocr
+            : _SequenceIssueKind.color;
+        _selectedPoint = token.move.point;
+        return;
+      }
+    }
+    _issueNumber = null;
+    _issueKind = null;
+  }
 
-domain.IntersectionPrediction _fixturePrediction(
-  domain.BoardPoint point,
-  domain.StoneColor? stone,
-  bool uncertain,
-) {
-  if (uncertain) {
-    return domain.IntersectionPrediction(
-      point: point,
-      blackProbability: 0.42,
-      whiteProbability: 0.32,
-      emptyProbability: 0.26,
+  void _assignIssue({required bool pass}) {
+    final number = _issueNumber;
+    if (number == null || (!pass && _selectedPoint == null)) return;
+    final color = number.isOdd
+        ? domain.StoneColor.black
+        : domain.StoneColor.white;
+    final selectedPoint = _selectedPoint;
+    if (!pass && !_reuseSamePoint) {
+      _tokens.removeWhere(
+        (otherNumber, token) =>
+            otherNumber != number && token.move.point == selectedPoint,
+      );
+    }
+    _tokens[number] = domain.SequenceToken(
+      moveNumber: number,
+      move: pass
+          ? domain.Move.pass(color: color)
+          : domain.Move.play(color: color, point: selectedPoint!),
+      confidence: 1,
+    );
+    setState(() {
+      _reuseSamePoint = false;
+      _setNextIssue();
+    });
+    if (_issueNumber == null) _validateSequence();
+  }
+
+  Future<void> _validateSequence() async {
+    if (_validating || widget.capture == null) return;
+    setState(() => _validating = true);
+    final capture = widget.capture!;
+    try {
+      final document = await widget.solver.solve(
+        _tokens.values.toList(growable: false),
+        const domain.GoRules.chinese(),
+        documentId: _scanDocumentId(capture, 'numbered'),
+        boardSize: capture.draft.boardSize,
+        source: _scanSource(capture),
+      );
+      if (document is! domain.VerifiedGameRecord) {
+        throw const SequenceSolveException(
+          SequenceSolveErrorCode.illegalSequence,
+          'Sequence solver did not produce a verified record.',
+        );
+      }
+      final recognizedFinal = domain.BoardPosition(
+        size: capture.draft.boardSize,
+        stones: _stonesFromDraft(capture.draft),
+      );
+      if (document.finalPosition != recognizedFinal) {
+        final mismatch = _firstMismatch(
+          document.finalPosition,
+          recognizedFinal,
+        );
+        final related = _tokens.values
+            .where((token) => token.move.point == mismatch)
+            .map((token) => token.moveNumber)
+            .fold<int?>(
+              null,
+              (value, number) =>
+                  value == null ? number : math.max(value, number),
+            );
+        if (!mounted) return;
+        setState(() {
+          _issueNumber = related ?? _tokens.keys.reduce(math.max);
+          _issueKind = _SequenceIssueKind.finalMismatch;
+          _selectedPoint = _tokens[_issueNumber]?.move.point;
+        });
+        return;
+      }
+      if (!mounted) return;
+      setState(() => _verified = document);
+    } on SequenceSolveException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _issueNumber = error.moveNumber ?? 1;
+        _issueKind = _sequenceIssueKind(error.code);
+        _selectedPoint = _tokens[_issueNumber]?.move.point;
+      });
+    } on Object {
+      if (!mounted) return;
+      setState(() {
+        _issueNumber ??= 1;
+        _issueKind = _SequenceIssueKind.failed;
+      });
+    } finally {
+      if (mounted) setState(() => _validating = false);
+    }
+  }
+
+  Future<void> _saveAndAnalyze() async {
+    if (_saving || _verified == null) return;
+    setState(() => _saving = true);
+    try {
+      await KifuWorkspace.of(context).addPersisted(_verified!);
+      if (!mounted) return;
+      Navigator.pushReplacementNamed(
+        context,
+        AppRoutes.analysisProgress,
+        arguments: _verified,
+      );
+    } on Object {
+      if (mounted) {
+        setState(() => _saving = false);
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(context.l10n.saveKifuFailed)));
+      }
+    }
+  }
+
+  void _saveAsPosition() {
+    final capture = widget.capture!;
+    final snapshot = domain.PositionSnapshot(
+      id: _scanDocumentId(capture, 'position'),
+      position: domain.BoardPosition(
+        size: capture.draft.boardSize,
+        stones: _stonesFromDraft(capture.draft),
+      ),
+      rules: const domain.GoRules.chinese(),
+      source: _scanSource(capture),
+    );
+    Navigator.pushReplacementNamed(
+      context,
+      AppRoutes.scanResult,
+      arguments: ScanPositionPayload(
+        snapshot: snapshot,
+        originalFrame: capture.originalFrame,
+        draft: capture.draft,
+      ),
     );
   }
-  return switch (stone) {
-    domain.StoneColor.black => domain.IntersectionPrediction(
-      point: point,
-      blackProbability: 0.98,
-      whiteProbability: 0.01,
-      emptyProbability: 0.01,
-    ),
-    domain.StoneColor.white => domain.IntersectionPrediction(
-      point: point,
-      blackProbability: 0.01,
-      whiteProbability: 0.98,
-      emptyProbability: 0.01,
-    ),
-    null => domain.IntersectionPrediction(
-      point: point,
-      blackProbability: 0.01,
-      whiteProbability: 0.01,
-      emptyProbability: 0.98,
-    ),
-  };
 }
 
-Map<domain.BoardPoint, domain.StoneColor> _stonesFromDraft(
-  domain.ScanDraft draft,
-) {
-  final stones = <domain.BoardPoint, domain.StoneColor>{};
-  for (final prediction in draft.intersections) {
-    final stone = prediction.predictedStone;
-    if (stone != null) stones[prediction.point] = stone;
-  }
-  return stones;
+class _SequenceIssuePanel extends StatelessWidget {
+  const _SequenceIssuePanel({
+    required this.moveNumber,
+    required this.detail,
+    required this.validating,
+  });
+
+  final int? moveNumber;
+  final String? detail;
+  final bool validating;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    container: true,
+    liveRegion: true,
+    label: validating
+        ? '${context.l10n.validatingGoRules}, '
+              '${detail ?? context.l10n.checkingSequenceRules}'
+        : '${context.l10n.moveCannotConfirm(moveNumber?.toString() ?? '—')}, '
+              '${detail ?? context.l10n.sequenceValidationFailed}',
+    excludeSemantics: true,
+    child: SurfacePanel(
+      padding: const EdgeInsets.all(GoSpacing.s2),
+      color: validating
+          ? Theme.of(context).colorScheme.primaryContainer
+          : Theme.of(context).colorScheme.errorContainer,
+      child: Row(
+        children: <Widget>[
+          if (validating)
+            const SizedBox.square(
+              dimension: 22,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          else
+            const Icon(Icons.warning_amber_rounded),
+          const SizedBox(width: GoSpacing.s2),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  validating
+                      ? context.l10n.validatingGoRules
+                      : context.l10n.moveCannotConfirm(
+                          moveNumber?.toString() ?? '—',
+                        ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+                Text(
+                  detail ?? context.l10n.checkingSequenceRules,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _NumberedVerifiedView extends StatelessWidget {
+  const _NumberedVerifiedView({
+    required this.record,
+    required this.saving,
+    required this.onContinue,
+  });
+
+  final domain.VerifiedGameRecord record;
+  final bool saving;
+  final VoidCallback onContinue;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    body: Column(
+      children: <Widget>[
+        FeatureTopBar(
+          title: context.l10n.sequenceVerifiedTitle,
+          subtitle: context.l10n.sequenceVerifiedSubtitle,
+          leading: const BackCircleButton(),
+        ),
+        Expanded(
+          child: SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.all(GoSpacing.s4),
+              child: Column(
+                children: <Widget>[
+                  Expanded(
+                    child: Center(
+                      child: AspectRatio(
+                        aspectRatio: 1,
+                        child: GoBoard(
+                          boardSize: record.boardSize.dimension,
+                          stones: _uiStones(record.finalPosition.stones),
+                          semanticLabel: context.l10n.verifiedRecordSemantics(
+                            record.boardSize.dimension,
+                            record.moves.length,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: GoSpacing.s3),
+                  MetricPill(
+                    label: context.l10n.completeKifu,
+                    value: context.l10n.moveCount(record.moves.length),
+                    tone: MetricTone.positive,
+                    icon: Icons.verified_outlined,
+                  ),
+                  const SizedBox(height: GoSpacing.s3),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: saving ? null : onContinue,
+                      icon: saving
+                          ? const SizedBox.square(
+                              dimension: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.analytics_outlined),
+                      label: Text(
+                        saving
+                            ? context.l10n.saving
+                            : context.l10n.saveAndStartReview,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 class _CorrectionChoiceButton extends StatelessWidget {
@@ -425,59 +820,37 @@ class _CorrectionChoiceButton extends StatelessWidget {
   final bool selected;
   final VoidCallback onTap;
 
-  String get _label => switch (choice) {
-    _CorrectionChoice.black => '黑',
-    _CorrectionChoice.white => '白',
-    _CorrectionChoice.empty => '空',
-    _CorrectionChoice.uncertain => '看不清',
-  };
-
-  IconData get _icon => switch (choice) {
-    _CorrectionChoice.black => Icons.circle,
-    _CorrectionChoice.white => Icons.circle_outlined,
-    _CorrectionChoice.empty => Icons.close_rounded,
-    _CorrectionChoice.uncertain => Icons.help_outline_rounded,
-  };
-
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final label = _correctionChoiceLabel(context.l10n, choice);
     return Semantics(
       button: true,
       selected: selected,
-      label: '标记为$_label',
-      child: Material(
-        color: selected
-            ? theme.colorScheme.primaryContainer
-            : theme.colorScheme.surfaceContainerHighest,
+      label: context.l10n.markStone(label),
+      excludeSemantics: true,
+      child: InkWell(
+        onTap: onTap,
         borderRadius: BorderRadius.circular(GoRadii.small),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(GoRadii.small),
-          child: SizedBox(
-            height: 56,
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: <Widget>[
-                Icon(
-                  _icon,
-                  size: 20,
-                  color: selected
-                      ? theme.colorScheme.onPrimaryContainer
-                      : theme.colorScheme.onSurfaceVariant,
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  _label,
-                  maxLines: 1,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: selected
-                        ? theme.colorScheme.onPrimaryContainer
-                        : theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
-            ),
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 56),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: selected
+                ? Theme.of(context).colorScheme.primaryContainer
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(GoRadii.small),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Icon(switch (choice) {
+                _CorrectionChoice.black => Icons.circle,
+                _CorrectionChoice.white => Icons.circle_outlined,
+                _CorrectionChoice.empty => Icons.close_rounded,
+                _CorrectionChoice.uncertain => Icons.help_outline_rounded,
+              }, size: 19),
+              Text(label, style: Theme.of(context).textTheme.labelSmall),
+            ],
           ),
         ),
       ),
@@ -485,190 +858,138 @@ class _CorrectionChoiceButton extends StatelessWidget {
   }
 }
 
-class NumberedKifuCorrectionScreen extends StatefulWidget {
-  const NumberedKifuCorrectionScreen({super.key});
+class _MissingCorrectionData extends StatelessWidget {
+  const _MissingCorrectionData({required this.title});
+
+  final String title;
 
   @override
-  State<NumberedKifuCorrectionScreen> createState() =>
-      _NumberedKifuCorrectionScreenState();
+  Widget build(BuildContext context) => Scaffold(
+    body: Center(
+      child: FilledButton(
+        onPressed: () => Navigator.pushNamedAndRemoveUntil(
+          context,
+          AppRoutes.root,
+          (_) => false,
+        ),
+        child: Text(context.l10n.rescanWithReason(title)),
+      ),
+    ),
+  );
 }
 
-class _NumberedKifuCorrectionScreenState
-    extends State<NumberedKifuCorrectionScreen> {
-  int? _selectedMove;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final numberedStones = <BoardStone>[
-      ...UiFixtures.stones.where(
-        (stone) => stone.point != const BoardPoint(16, 5),
-      ),
-      const BoardStone(
-        point: BoardPoint(16, 5),
-        color: StoneColor.white,
-        moveNumber: 87,
-      ),
-    ];
-    return Scaffold(
-      body: Column(
+Future<void> _showOriginalFrame(
+  BuildContext context,
+  domain.CapturedFrame frame,
+) => showDialog<void>(
+  context: context,
+  builder: (context) => Dialog(
+    clipBehavior: Clip.antiAlias,
+    child: SizedBox(
+      width: 520,
+      height: math.min(560, MediaQuery.sizeOf(context).height - 96),
+      child: Column(
         children: <Widget>[
-          const FeatureTopBar(
-            title: '校对手顺',
-            subtitle: '编号棋谱图 · 已识别 86 手',
-            leading: BackCircleButton(),
-          ),
           Expanded(
-            child: SafeArea(
-              top: false,
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final boardSide = math.min(
-                    math.min(constraints.maxWidth, 520.0) - GoSpacing.s8,
-                    math.max(180.0, constraints.maxHeight - 330.0),
-                  );
-                  return Center(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 520),
-                      child: Padding(
-                        key: const Key('numbered-correction-scroll'),
-                        padding: const EdgeInsets.fromLTRB(
-                          GoSpacing.s4,
-                          GoSpacing.s1,
-                          GoSpacing.s4,
-                          GoSpacing.s2,
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: <Widget>[
-                            Center(
-                              child: SizedBox.square(
-                                dimension: boardSide,
-                                child: GoBoard(
-                                  stones: numberedStones,
-                                  selectedPoint: const BoardPoint(16, 5),
-                                  lastMove: const BoardPoint(16, 5),
-                                  semanticLabel: '编号棋谱校对，第87手位置无法确认',
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: GoSpacing.s2),
-                            SurfacePanel(
-                              padding: const EdgeInsets.all(GoSpacing.s3),
-                              color: theme.colorScheme.errorContainer,
-                              child: Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: <Widget>[
-                                  Icon(
-                                    Icons.warning_amber_rounded,
-                                    color: theme.colorScheme.onErrorContainer,
-                                  ),
-                                  const SizedBox(width: GoSpacing.s2),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: <Widget>[
-                                        Text(
-                                          '第87手无法确认',
-                                          style: theme.textTheme.titleSmall
-                                              ?.copyWith(
-                                                color: theme
-                                                    .colorScheme
-                                                    .onErrorContainer,
-                                              ),
-                                        ),
-                                        Text(
-                                          '可能是反色数字，或提子后的同点复用。',
-                                          maxLines: 2,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: theme.textTheme.bodySmall
-                                              ?.copyWith(
-                                                color: theme
-                                                    .colorScheme
-                                                    .onErrorContainer,
-                                              ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(height: GoSpacing.s2),
-                            Text('数字候选', style: theme.textTheme.titleMedium),
-                            const SizedBox(height: GoSpacing.s1),
-                            Row(
-                              children: <Widget>[
-                                for (final move in <int>[87, 37, 81, 97]) ...[
-                                  Expanded(
-                                    child: ChoiceChip(
-                                      label: SizedBox(
-                                        width: double.infinity,
-                                        child: Text(
-                                          '$move',
-                                          textAlign: TextAlign.center,
-                                        ),
-                                      ),
-                                      selected: _selectedMove == move,
-                                      onSelected: (_) =>
-                                          setState(() => _selectedMove = move),
-                                    ),
-                                  ),
-                                  if (move != 97)
-                                    const SizedBox(width: GoSpacing.s1),
-                                ],
-                              ],
-                            ),
-                            const SizedBox(height: GoSpacing.s1),
-                            SizedBox(
-                              width: double.infinity,
-                              child: ChoiceChip(
-                                avatar: const Icon(
-                                  Icons.undo_rounded,
-                                  size: 18,
-                                ),
-                                label: const SizedBox(
-                                  width: double.infinity,
-                                  child: Text(
-                                    '提子后同点复用',
-                                    textAlign: TextAlign.center,
-                                  ),
-                                ),
-                                selected: _selectedMove == -1,
-                                onSelected: (_) =>
-                                    setState(() => _selectedMove = -1),
-                              ),
-                            ),
-                            const Spacer(),
-                            const SizedBox(height: GoSpacing.s2),
-                            FilledButton(
-                              onPressed: _selectedMove == null
-                                  ? null
-                                  : () => Navigator.pushNamed(
-                                      context,
-                                      AppRoutes.scanResult,
-                                    ),
-                              child: const Text('验证手顺并继续'),
-                            ),
-                            TextButton(
-                              onPressed: () => Navigator.pushNamed(
-                                context,
-                                AppRoutes.scanResult,
-                              ),
-                              child: const Text('无法判断，按当前局面保存'),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  );
-                },
+            child: ColoredBox(
+              color: GoPrimitiveColors.night,
+              child: Image.memory(
+                frame.encodedBytes,
+                fit: BoxFit.contain,
+                errorBuilder: (context, _, _) => Center(
+                  child: Text(
+                    context.l10n.originalImageUnavailable,
+                    style: const TextStyle(color: GoCameraColors.foreground),
+                  ),
+                ),
               ),
             ),
           ),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(context.l10n.closeAction),
+          ),
         ],
       ),
-    );
+    ),
+  ),
+);
+
+String _correctionChoiceLabel(
+  AppLocalizations l10n,
+  _CorrectionChoice choice,
+) => switch (choice) {
+  _CorrectionChoice.black => l10n.blackStoneShort,
+  _CorrectionChoice.white => l10n.whiteStoneShort,
+  _CorrectionChoice.empty => l10n.emptyPoint,
+  _CorrectionChoice.uncertain => l10n.unclearPoint,
+};
+
+_SequenceIssueKind _sequenceIssueKind(SequenceSolveErrorCode code) =>
+    switch (code) {
+      SequenceSolveErrorCode.empty => _SequenceIssueKind.noFirst,
+      SequenceSolveErrorCode.tooManyMoves => _SequenceIssueKind.tooMany,
+      SequenceSolveErrorCode.duplicateMoveNumber =>
+        _SequenceIssueKind.duplicate,
+      SequenceSolveErrorCode.missingMoveNumber => _SequenceIssueKind.missing,
+      SequenceSolveErrorCode.uncertainToken => _SequenceIssueKind.ocr,
+      SequenceSolveErrorCode.wrongColor => _SequenceIssueKind.color,
+      SequenceSolveErrorCode.illegalSequence => _SequenceIssueKind.illegal,
+    };
+
+String? _sequenceIssueDetail(AppLocalizations l10n, _SequenceIssueKind? kind) =>
+    switch (kind) {
+      null => null,
+      _SequenceIssueKind.noFirst => l10n.sequenceIssueNoFirst,
+      _SequenceIssueKind.missing => l10n.sequenceIssueMissing,
+      _SequenceIssueKind.ocr => l10n.sequenceIssueOcr,
+      _SequenceIssueKind.color => l10n.sequenceIssueColor,
+      _SequenceIssueKind.finalMismatch => l10n.sequenceIssueFinalMismatch,
+      _SequenceIssueKind.tooMany => l10n.sequenceIssueTooMany,
+      _SequenceIssueKind.duplicate => l10n.sequenceIssueDuplicate,
+      _SequenceIssueKind.illegal => l10n.sequenceIssueIllegal,
+      _SequenceIssueKind.failed => l10n.sequenceValidationFailed,
+    };
+
+Map<domain.BoardPoint, domain.StoneColor> _stonesFromDraft(
+  domain.ScanDraft draft,
+) => <domain.BoardPoint, domain.StoneColor>{
+  for (final prediction in draft.intersections)
+    prediction.point: ?prediction.predictedStone,
+};
+
+List<BoardStone> _uiStones(Map<domain.BoardPoint, domain.StoneColor> stones) =>
+    <BoardStone>[
+      for (final entry in stones.entries)
+        BoardStone(
+          point: _uiPoint(entry.key),
+          color: entry.value == domain.StoneColor.black
+              ? StoneColor.black
+              : StoneColor.white,
+        ),
+    ];
+
+BoardPoint _uiPoint(domain.BoardPoint point) =>
+    BoardPoint(point.column, point.row);
+
+domain.KifuSource _scanSource(ScanCapturePayload capture) => domain.KifuSource(
+  kind: capture.inputKind == ScanInputKind.camera
+      ? domain.KifuSourceKind.camera
+      : domain.KifuSourceKind.photoLibrary,
+);
+
+String _scanDocumentId(ScanCapturePayload capture, String suffix) =>
+    'scan-$suffix-${sha256.convert(capture.originalFrame.encodedBytes)}';
+
+domain.BoardPoint _firstMismatch(
+  domain.BoardPosition left,
+  domain.BoardPosition right,
+) {
+  for (var row = 0; row < left.size.dimension; row++) {
+    for (var column = 0; column < left.size.dimension; column++) {
+      final point = domain.BoardPoint(column, row);
+      if (left.stoneAt(point) != right.stoneAt(point)) return point;
+    }
   }
+  throw StateError('Positions were equal.');
 }

@@ -66,6 +66,27 @@ void main() {
       );
       expect(modelFixture().sha256, hasLength(64));
     });
+
+    test('pins the separate HumanSL model whenever ranks are declared', () {
+      ModelManifest build({String? humanHash, List<GoRank> ranks = const []}) =>
+          ModelManifest(
+            id: 'model',
+            displayName: 'Model',
+            sha256: 'a' * 64,
+            engineVersion: '1.16.5',
+            modelVersion: 'b18',
+            license: 'CC-BY-4.0',
+            humanModelSha256: humanHash,
+            humanStyleRanks: ranks,
+          );
+
+      expect(() => build(ranks: [GoRank.kyu(1)]), throwsFormatException);
+      expect(() => build(humanHash: 'd' * 64), throwsArgumentError);
+      expect(
+        build(humanHash: 'd' * 64, ranks: [GoRank.kyu(1)]),
+        isA<ModelManifest>(),
+      );
+    });
   });
 
   group('performance report', () {

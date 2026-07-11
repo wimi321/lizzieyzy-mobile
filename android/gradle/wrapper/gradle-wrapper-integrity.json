@@ -1,0 +1,33 @@
+{
+  "distribution": {
+    "sha256": "fba8464465835e74f7270bbf43d6d8a8d7709ab0a43ce1aa3323f73e9aa0c612",
+    "url": "https://services.gradle.org/distributions/gradle-8.13-all.zip"
+  },
+  "files": [
+    {
+      "bytes": 4971,
+      "executable": true,
+      "path": "android/gradlew",
+      "sha256": "ec56c02543666d92d9ac5ae7fcc48f88ce4de0deb8b7f9b39928ca46f68c1b2b"
+    },
+    {
+      "bytes": 2404,
+      "executable": false,
+      "path": "android/gradlew.bat",
+      "sha256": "c13c6e91b9a517783976de213d46398c661ea9e17651376d7301e839eaedcc62"
+    },
+    {
+      "bytes": 53636,
+      "executable": false,
+      "path": "android/gradle/wrapper/gradle-wrapper.jar",
+      "sha256": "16caeaf66d57a0d1d2087fef6a97efa62de8da69afa5b908f40db35afc4342da"
+    },
+    {
+      "bytes": 288,
+      "executable": false,
+      "path": "android/gradle/wrapper/gradle-wrapper.properties",
+      "sha256": "dbf05f04b7f096cd5dba7cd510e7ecd2bd03d248264426fb852be0baa30e0ce5"
+    }
+  ],
+  "schemaVersion": 1
+}

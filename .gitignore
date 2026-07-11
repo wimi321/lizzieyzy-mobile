@@ -35,6 +35,19 @@ migrate_working_dir/
 /test/artifacts/
 /test/failures/
 
+# iOS signing and distribution material must stay outside the repository.
+*.p12
+*.p8
+*.cer
+*.mobileprovision
+*.provisionprofile
+*.ipa
+*.xcarchive/
+/ios/signing/
+/ios/ExportOptions*.plist
+/ios/**/*.key
+/ios/**/*.pem
+
 # Symbolication related
 app.*.symbols
 

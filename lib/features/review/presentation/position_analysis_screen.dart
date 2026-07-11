@@ -2,69 +2,72 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:lizzieyzy_mobile/design_system/design_system.dart';
+import 'package:lizzieyzy_mobile/domain/domain.dart' as domain;
+import 'package:lizzieyzy_mobile/l10n/l10n.dart';
 
+import '../../../app/app_routes.dart';
 import '../../common/presentation/feature_chrome.dart';
-import '../../fixtures/ui_fixtures.dart';
+import 'review_screen_data.dart';
 
-/// Analysis for a still-photo position.
+/// Numeric analysis for a still-photo position.
 ///
-/// A single photo has no trustworthy move sequence, so this screen
-/// intentionally has no move timeline, key-move ranking, or performance band.
+/// A single photo has no trustworthy move sequence, so this screen has no
+/// move timeline, key-move ranking, or performance interval by construction.
 class PositionAnalysisScreen extends StatefulWidget {
-  const PositionAnalysisScreen({super.key});
+  const PositionAnalysisScreen({super.key, this.data, this.snapshot});
+
+  final PositionAnalysisData? data;
+  final domain.PositionSnapshot? snapshot;
 
   @override
   State<PositionAnalysisScreen> createState() => _PositionAnalysisScreenState();
 }
 
 class _PositionAnalysisScreenState extends State<PositionAnalysisScreen> {
-  var _selectedCandidate = 0;
-
-  static const _coordinates = <String>['R14', 'Q14', 'O16'];
-  static const _winRates = <String>['57.8%', '55.1%', '53.6%'];
-  static const _scoreLeads = <String>['+3.1目', '+1.4目', '+0.6目'];
-  static const _visits = <String>['12,840', '7,226', '4,908'];
-  static const _variations = <List<String>>[
-    <String>['R14', 'R15', 'Q13', 'P14', 'S13'],
-    <String>['Q14', 'R14', 'P15', 'Q13', 'O16'],
-    <String>['O16', 'P17', 'N17', 'Q16', 'R15'],
-  ];
+  var _selected = 0;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final label = String.fromCharCode(65 + _selectedCandidate);
+    final l10n = context.l10n;
+    final data = widget.data;
+    if (data == null) {
+      return _PositionAnalysisRequired(snapshot: widget.snapshot);
+    }
+    final candidates = data.root.candidates.take(3).toList(growable: false);
+    if (_selected >= candidates.length) {
+      _selected = 0;
+    }
+    final selected = candidates.isEmpty ? null : candidates[_selected];
+    final largeText = MediaQuery.textScalerOf(context).scale(1) >= 1.6;
+    final extraLargeText = MediaQuery.textScalerOf(context).scale(1) >= 2.5;
     return Scaffold(
       body: Column(
         children: <Widget>[
-          const FeatureTopBar(
-            title: '局面分析',
-            subtitle: '当前局面 · 无完整手顺',
-            leading: BackCircleButton(),
+          FeatureTopBar(
+            title: l10n.positionAnalysisTitle,
+            subtitle: l10n.positionAnalysisSubtitle,
+            leading: const BackCircleButton(),
           ),
           Expanded(
             child: SafeArea(
               top: false,
               child: LayoutBuilder(
                 builder: (context, constraints) {
-                  const horizontalPadding = GoSpacing.s3;
-                  final textScale = MediaQuery.textScalerOf(context).scale(1);
-                  final largeText = textScale > 1.45;
-                  final reservedHeight =
-                      376 + math.max<double>(0, textScale - 1) * 140;
+                  final reserved = extraLargeText
+                      ? 212.0
+                      : largeText
+                      ? 250.0
+                      : 326.0;
                   final boardSide = math.min<double>(
-                    constraints.maxWidth - horizontalPadding * 2,
-                    math.max<double>(
-                      184,
-                      constraints.maxHeight - reservedHeight,
-                    ),
+                    constraints.maxWidth - GoSpacing.s6,
+                    math.max<double>(120, constraints.maxHeight - reserved),
                   );
                   return Padding(
                     padding: const EdgeInsets.fromLTRB(
-                      horizontalPadding,
+                      GoSpacing.s3,
                       GoSpacing.s1,
-                      horizontalPadding,
-                      GoSpacing.s1,
+                      GoSpacing.s3,
+                      GoSpacing.s2,
                     ),
                     child: Column(
                       key: const Key('position-analysis-viewport'),
@@ -72,151 +75,45 @@ class _PositionAnalysisScreenState extends State<PositionAnalysisScreen> {
                         SizedBox.square(
                           dimension: boardSide,
                           child: GoBoard(
-                            stones: UiFixtures.stones,
-                            candidates: UiFixtures.candidates,
+                            boardSize: data.snapshot.boardSize.dimension,
+                            stones: data.stones,
+                            candidates: data.candidatesFor(l10n),
                             selectedPoint:
-                                UiFixtures.candidates[_selectedCandidate].point,
-                            semanticLabel: '当前局面分析棋盘，已选择候选$label',
+                                selected == null || selected.move.isPass
+                                ? null
+                                : uiPoint(selected.move.point!),
+                            semanticLabel: l10n.positionBoardSemantics(
+                              _playerLabel(data.root.toPlay, l10n),
+                              candidates.length,
+                            ),
                             showCoordinates: true,
                           ),
                         ),
                         const SizedBox(height: GoSpacing.s1),
-                        Semantics(
-                          label: '当前局面不包含完整手顺，不提供关键手和棋力评估',
-                          child: SurfacePanel(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: GoSpacing.s2,
-                              vertical: GoSpacing.s1,
-                            ),
-                            color: theme.colorScheme.secondaryContainer,
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: <Widget>[
-                                Icon(
-                                  Icons.info_outline_rounded,
-                                  color: theme.colorScheme.onSecondaryContainer,
-                                ),
-                                const SizedBox(width: GoSpacing.s3),
-                                Expanded(
-                                  child: Text(
-                                    '单张照片没有落子时间；仅分析此刻的候选与形势，不显示关键手时间轴或棋力。',
-                                    maxLines: largeText ? 1 : 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: theme.textTheme.bodySmall?.copyWith(
-                                      color: theme
-                                          .colorScheme
-                                          .onSecondaryContainer,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
+                        if (!largeText) const _StaticPositionBoundary(),
+                        if (!largeText) const SizedBox(height: GoSpacing.s1),
+                        if (candidates.isNotEmpty)
+                          _CandidateSelector(
+                            candidates: candidates,
+                            boardSize: data.snapshot.boardSize,
+                            selected: _selected,
+                            compact: largeText,
+                            onSelected: (index) =>
+                                setState(() => _selected = index),
                           ),
-                        ),
                         const SizedBox(height: GoSpacing.s1),
-                        Row(
-                          children: <Widget>[
-                            for (var index = 0; index < 3; index++)
-                              Expanded(
-                                child: Padding(
-                                  padding: EdgeInsets.only(
-                                    right: index == 2 ? 0 : GoSpacing.s2,
-                                  ),
-                                  child: _CandidateChoice(
-                                    label: String.fromCharCode(65 + index),
-                                    coordinate: _coordinates[index],
-                                    selected: index == _selectedCandidate,
-                                    singleLine: largeText,
-                                    onTap: () => setState(
-                                      () => _selectedCandidate = index,
-                                    ),
-                                  ),
+                        Expanded(
+                          child: selected == null
+                              ? const _NoCandidatePanel()
+                              : _PositionCandidatePanel(
+                                  candidate: selected,
+                                  label: String.fromCharCode(65 + _selected),
+                                  boardSize: data.snapshot.boardSize,
+                                  toPlay: data.root.toPlay,
+                                  compact: largeText,
+                                  extraCompact: extraLargeText,
                                 ),
-                              ),
-                          ],
                         ),
-                        const SizedBox(height: GoSpacing.s1),
-                        if (largeText)
-                          _LargeTextPositionInspector(
-                            label: label,
-                            coordinate: _coordinates[_selectedCandidate],
-                            winRate: _winRates[_selectedCandidate],
-                            scoreLead: _scoreLeads[_selectedCandidate],
-                            visits: _visits[_selectedCandidate],
-                            variation: _variations[_selectedCandidate],
-                            best: _selectedCandidate == 0,
-                          )
-                        else
-                          SurfacePanel(
-                            padding: const EdgeInsets.all(GoSpacing.s2),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: <Widget>[
-                                Row(
-                                  children: <Widget>[
-                                    CandidateMarker(
-                                      label: label,
-                                      selected: true,
-                                    ),
-                                    const SizedBox(width: GoSpacing.s3),
-                                    Text(
-                                      _coordinates[_selectedCandidate],
-                                      style: theme.textTheme.headlineSmall,
-                                    ),
-                                    const Spacer(),
-                                    if (_selectedCandidate == 0)
-                                      const MetricPill(
-                                        label: '最佳候选',
-                                        tone: MetricTone.primary,
-                                        compact: true,
-                                      ),
-                                  ],
-                                ),
-                                const SizedBox(height: GoSpacing.s1),
-                                Wrap(
-                                  spacing: GoSpacing.s2,
-                                  runSpacing: GoSpacing.s2,
-                                  children: <Widget>[
-                                    MetricPill(
-                                      label: '黑胜率',
-                                      value: _winRates[_selectedCandidate],
-                                    ),
-                                    MetricPill(
-                                      label: '黑方目差',
-                                      value: _scoreLeads[_selectedCandidate],
-                                      tone: MetricTone.positive,
-                                    ),
-                                    MetricPill(
-                                      label: '访问',
-                                      value: _visits[_selectedCandidate],
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: GoSpacing.s1),
-                                Text('主变化', style: theme.textTheme.titleSmall),
-                                const SizedBox(height: GoSpacing.s1),
-                                Wrap(
-                                  spacing: GoSpacing.s2,
-                                  runSpacing: GoSpacing.s2,
-                                  children: <Widget>[
-                                    for (
-                                      var index = 0;
-                                      index <
-                                          _variations[_selectedCandidate]
-                                              .length;
-                                      index++
-                                    )
-                                      _VariationMove(
-                                        number: index + 1,
-                                        coordinate:
-                                            _variations[_selectedCandidate][index],
-                                        black: index.isEven,
-                                      ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
                       ],
                     ),
                   );
@@ -230,104 +127,135 @@ class _PositionAnalysisScreenState extends State<PositionAnalysisScreen> {
   }
 }
 
-class _CandidateChoice extends StatelessWidget {
-  const _CandidateChoice({
-    required this.label,
-    required this.coordinate,
-    required this.selected,
-    required this.singleLine,
-    required this.onTap,
-  });
-
-  final String label;
-  final String coordinate;
-  final bool selected;
-  final bool singleLine;
-  final VoidCallback onTap;
+class _StaticPositionBoundary extends StatelessWidget {
+  const _StaticPositionBoundary();
 
   @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Semantics(
-      button: true,
-      selected: selected,
-      label: '候选$label，$coordinate',
-      child: Material(
-        color: selected
-            ? theme.colorScheme.primaryContainer
-            : theme.colorScheme.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(GoRadii.card),
-          side: BorderSide(
-            color: selected
-                ? theme.colorScheme.primary
-                : context.goColors.softDivider,
-          ),
-        ),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(GoRadii.card),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(
-              minHeight: GoSizes.minimumTouchTarget,
-            ),
-            child: Center(
-              child: singleLine
-                  ? Text(
-                      '$label · $coordinate',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.labelMedium,
-                    )
-                  : Column(
-                      mainAxisSize: MainAxisSize.min,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: <Widget>[
-                        Text(label, style: theme.textTheme.labelMedium),
-                        Text(coordinate, style: theme.textTheme.bodySmall),
-                      ],
-                    ),
-            ),
-          ),
-        ),
+  Widget build(BuildContext context) => Semantics(
+    label: context.l10n.staticPositionBoundarySemantics,
+    child: SurfacePanel(
+      padding: const EdgeInsets.symmetric(
+        horizontal: GoSpacing.s2,
+        vertical: GoSpacing.s1,
       ),
-    );
-  }
+      color: Theme.of(context).colorScheme.secondaryContainer,
+      child: Row(
+        children: <Widget>[
+          Icon(
+            Icons.info_outline_rounded,
+            color: Theme.of(context).colorScheme.onSecondaryContainer,
+          ),
+          const SizedBox(width: GoSpacing.s2),
+          Expanded(
+            child: Text(
+              context.l10n.staticPositionBoundaryBody,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
-class _LargeTextPositionInspector extends StatelessWidget {
-  const _LargeTextPositionInspector({
-    required this.label,
-    required this.coordinate,
-    required this.winRate,
-    required this.scoreLead,
-    required this.visits,
-    required this.variation,
-    required this.best,
+class _CandidateSelector extends StatelessWidget {
+  const _CandidateSelector({
+    required this.candidates,
+    required this.boardSize,
+    required this.selected,
+    required this.compact,
+    required this.onSelected,
   });
 
+  final List<domain.Candidate> candidates;
+  final domain.BoardSize boardSize;
+  final int selected;
+  final bool compact;
+  final ValueChanged<int> onSelected;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: <Widget>[
+      for (var index = 0; index < candidates.length; index++)
+        Expanded(
+          child: Padding(
+            padding: EdgeInsets.only(
+              right: index == candidates.length - 1 ? 0 : GoSpacing.s2,
+            ),
+            child: Semantics(
+              button: true,
+              selected: index == selected,
+              label: context.l10n.candidateChoiceSemantics(
+                String.fromCharCode(65 + index),
+                formatMove(candidates[index].move, boardSize, context.l10n),
+                formatScore(candidates[index].scoreLead, context.l10n),
+              ),
+              excludeSemantics: true,
+              child: ChoiceChip(
+                selected: index == selected,
+                showCheckmark: false,
+                onSelected: (_) => onSelected(index),
+                label: SizedBox(
+                  width: double.infinity,
+                  child: Text(
+                    compact
+                        ? String.fromCharCode(65 + index)
+                        : '${String.fromCharCode(65 + index)} · '
+                              '${formatMove(candidates[index].move, boardSize, context.l10n)}',
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+    ],
+  );
+}
+
+class _PositionCandidatePanel extends StatelessWidget {
+  const _PositionCandidatePanel({
+    required this.candidate,
+    required this.label,
+    required this.boardSize,
+    required this.toPlay,
+    required this.compact,
+    required this.extraCompact,
+  });
+
+  final domain.Candidate candidate;
   final String label;
-  final String coordinate;
-  final String winRate;
-  final String scoreLead;
-  final String visits;
-  final List<String> variation;
-  final bool best;
+  final domain.BoardSize boardSize;
+  final domain.StoneColor toPlay;
+  final bool compact;
+  final bool extraCompact;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final variationLabel = variation.join(' → ');
+    final l10n = context.l10n;
+    final move = formatMove(candidate.move, boardSize, l10n);
+    final pv = candidate.principalVariation
+        .take(extraCompact ? 3 : 6)
+        .map((move) => formatMove(move, boardSize, l10n))
+        .join('  ');
+    final semantics = l10n.candidatePanelSemantics(
+      label,
+      move,
+      _playerLabel(toPlay, l10n),
+      formatPercent(candidate.winRate),
+      formatScore(candidate.scoreLead, l10n),
+      l10n.visitsValue(formatVisits(candidate.visits)),
+      pv,
+    );
     return Semantics(
       container: true,
-      label:
-          '候选$label，$coordinate，黑胜率$winRate，黑方目差$scoreLead，$visits访问，主变化$variationLabel',
+      label: semantics,
       excludeSemantics: true,
       child: SurfacePanel(
-        padding: const EdgeInsets.symmetric(
-          horizontal: GoSpacing.s2,
-          vertical: GoSpacing.s1,
-        ),
+        padding: EdgeInsets.all(compact ? GoSpacing.s2 : GoSpacing.s3),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
@@ -337,30 +265,58 @@ class _LargeTextPositionInspector extends StatelessWidget {
                 const SizedBox(width: GoSpacing.s2),
                 Expanded(
                   child: Text(
-                    coordinate,
+                    move,
                     maxLines: 1,
-                    style: theme.textTheme.headlineSmall,
+                    style: Theme.of(context).textTheme.titleLarge,
                   ),
                 ),
-                if (best)
-                  const MetricPill(
-                    label: '最佳',
+                if (label == 'A' && !extraCompact)
+                  MetricPill(
+                    label: l10n.bestCandidate,
                     tone: MetricTone.primary,
                     compact: true,
                   ),
               ],
             ),
+            const SizedBox(height: GoSpacing.s1),
+            if (extraCompact)
+              Text(
+                l10n.candidateMetricDetail(
+                  formatPercent(candidate.winRate),
+                  formatScore(candidate.scoreLead, l10n),
+                  l10n.visitsValue(formatVisits(candidate.visits)),
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              )
+            else
+              Wrap(
+                spacing: GoSpacing.s1,
+                runSpacing: GoSpacing.s1,
+                children: <Widget>[
+                  MetricPill(
+                    label: l10n.playerWinRate(_playerLabel(toPlay, l10n)),
+                    value: formatPercent(candidate.winRate),
+                  ),
+                  MetricPill(
+                    label: l10n.blackScoreLeadLabel,
+                    value: formatScore(candidate.scoreLead, l10n),
+                    tone: MetricTone.gold,
+                  ),
+                  MetricPill(
+                    label: l10n.visitsLabel,
+                    value: formatVisits(candidate.visits),
+                  ),
+                ],
+              ),
+            const Spacer(),
             Text(
-              '黑胜率 $winRate · 目差 $scoreLead · 访问 $visits',
-              maxLines: 1,
+              pv.isEmpty
+                  ? l10n.principalVariationNone
+                  : l10n.principalVariationValue(pv),
+              maxLines: extraCompact ? 1 : 2,
               overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodySmall,
-            ),
-            Text(
-              '主变化 $variationLabel',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodySmall,
+              style: Theme.of(context).textTheme.bodySmall,
             ),
           ],
         ),
@@ -369,44 +325,85 @@ class _LargeTextPositionInspector extends StatelessWidget {
   }
 }
 
-class _VariationMove extends StatelessWidget {
-  const _VariationMove({
-    required this.number,
-    required this.coordinate,
-    required this.black,
-  });
-
-  final int number;
-  final String coordinate;
-  final bool black;
+class _NoCandidatePanel extends StatelessWidget {
+  const _NoCandidatePanel();
 
   @override
-  Widget build(BuildContext context) {
-    final colors = context.goColors;
-    return Semantics(
-      label: '第$number手，${black ? '黑' : '白'}方$coordinate',
-      child: Column(
-        children: <Widget>[
-          Container(
-            width: 34,
-            height: 34,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: black ? colors.blackStone : colors.whiteStone,
-              border: Border.all(color: colors.whiteStoneOutline),
-            ),
-            child: Text(
-              '$number',
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: black ? colors.whiteStone : colors.blackStone,
+  Widget build(BuildContext context) => SurfacePanel(
+    child: Center(child: Text(context.l10n.noPlayableCandidate)),
+  );
+}
+
+class _PositionAnalysisRequired extends StatelessWidget {
+  const _PositionAnalysisRequired({this.snapshot});
+
+  final domain.PositionSnapshot? snapshot;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    body: Column(
+      children: <Widget>[
+        FeatureTopBar(
+          title: context.l10n.positionAnalysisTitle,
+          subtitle: context.l10n.positionAnalysisSubtitle,
+          leading: const BackCircleButton(),
+        ),
+        Expanded(
+          child: SafeArea(
+            top: false,
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(GoSpacing.s4),
+                child: SurfacePanel(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: <Widget>[
+                      Icon(
+                        Icons.analytics_outlined,
+                        size: 48,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                      const SizedBox(height: GoSpacing.s3),
+                      Text(
+                        snapshot == null
+                            ? context.l10n.positionDataExpired
+                            : context.l10n.positionNotAnalyzed,
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      const SizedBox(height: GoSpacing.s2),
+                      Text(context.l10n.realKatagoOnly),
+                      const SizedBox(height: GoSpacing.s4),
+                      FilledButton(
+                        onPressed: snapshot == null
+                            ? () => Navigator.pushNamedAndRemoveUntil(
+                                context,
+                                AppRoutes.root,
+                                (_) => false,
+                              )
+                            : () => Navigator.pushReplacementNamed(
+                                context,
+                                AppRoutes.analysisProgress,
+                                arguments: snapshot,
+                              ),
+                        child: Text(
+                          snapshot == null
+                              ? context.l10n.returnToKifu
+                              : context.l10n.startAnalysis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
           ),
-          const SizedBox(height: 2),
-          Text(coordinate, style: Theme.of(context).textTheme.labelSmall),
-        ],
-      ),
-    );
-  }
+        ),
+      ],
+    ),
+  );
 }
+
+String _playerLabel(domain.StoneColor color, AppLocalizations l10n) =>
+    color == domain.StoneColor.black
+    ? l10n.blackPlayerFallback
+    : l10n.whitePlayerFallback;

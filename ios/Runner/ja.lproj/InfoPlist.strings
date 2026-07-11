@@ -1,0 +1,3 @@
+"NSCameraUsageDescription" = "囲碁盤を撮影し、現在の局面または番号付き棋譜図を端末上で認識するために使用します。";
+"NSPhotoLibraryUsageDescription" = "囲碁盤の写真または番号付き棋譜図を選び、端末上で認識するために使用します。";
+"NSLocalNetworkUsageDescription" = "設定したローカルネットワーク上の KataGo 解析サービスに接続するために使用します。";

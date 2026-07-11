@@ -87,6 +87,38 @@ void main() {
     );
   });
 
+  test(
+    'snapshot amendment cannot duplicate setup hidden in a source branch',
+    () {
+      final imported = codec.decode(
+        '(;FF[4]GM[1]SZ[19]C[root](;AB[dd]C[setup]))',
+        documentId: 'branched-snapshot',
+      );
+      final original = imported.document as PositionSnapshot;
+      final amended = PositionSnapshot(
+        id: original.id,
+        position: original.position,
+        rules: original.rules,
+        source: original.source,
+        metadata: original.metadata,
+        sourceSgf: original.sourceSgf,
+        playerToMove: StoneColor.white,
+      );
+
+      final encoded = codec.encode(amended);
+      final reparsed = codec.decode(encoded, documentId: 'amended-copy');
+      final snapshot = reparsed.document as PositionSnapshot;
+
+      expect(snapshot.position.count(StoneColor.black), 1);
+      expect(snapshot.playerToMove, StoneColor.white);
+      expect(reparsed.tree.sequence.first['C']!.values.single, 'root');
+      expect(
+        reparsed.tree.variations.single.sequence.single['C']!.values.single,
+        'setup',
+      );
+    },
+  );
+
   test('exports partial starting move number and collection', () {
     final partial = PartialGameRecord(
       id: 'partial',

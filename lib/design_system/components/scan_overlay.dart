@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:lizzieyzy_mobile/l10n/l10n.dart';
 
 import '../tokens.dart';
 
@@ -54,7 +55,7 @@ class ScanOverlay extends StatelessWidget {
                         child: onClose == null
                             ? null
                             : _CameraAction(
-                                tooltip: '关闭',
+                                tooltip: context.l10n.closeAction,
                                 icon: Icons.close_rounded,
                                 onPressed: onClose,
                               ),
@@ -122,14 +123,14 @@ class ScanOverlay extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: <Widget>[
                       _CameraAction(
-                        tooltip: '从相册选择',
+                        tooltip: context.l10n.selectFromPhotos,
                         icon: Icons.photo_library_outlined,
                         onPressed: onGallery,
                       ),
                       Semantics(
                         button: true,
                         enabled: onCapture != null,
-                        label: '拍照识谱',
+                        label: context.l10n.photoScanTitle,
                         excludeSemantics: true,
                         child: SizedBox.square(
                           dimension: 80,

@@ -1,0 +1,18 @@
+[project]
+name = "lizzieyzy-katago-bridge"
+version = "0.1.0"
+description = "Reference TLS-only WSS bridge for KataGo Analysis JSONL"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "websockets @ https://files.pythonhosted.org/packages/6f/28/258ebab549c2bf3e64d2b0217b973467394a9cea8c42f70418ca2c5d0d2e/websockets-16.0-py3-none-any.whl#sha256=1637db62fad1dc833276dded54215f2c7fa46912301a24bd94d45d46a011ceec",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC", "S", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*.py" = ["S101", "S603"]

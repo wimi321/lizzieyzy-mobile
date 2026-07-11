@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:lizzieyzy_mobile/l10n/l10n.dart';
 
 import '../tokens.dart';
 import 'metric_pill.dart';
@@ -12,7 +13,7 @@ class PerformanceBand extends StatelessWidget {
     super.key,
     this.bandStart = 0.28,
     this.bandEnd = 0.68,
-    this.title = '本局发挥估计',
+    this.title,
   }) : assert(effectiveDecisions >= 0),
        assert(bandStart >= 0 && bandStart <= 1),
        assert(bandEnd >= 0 && bandEnd <= 1),
@@ -24,15 +25,23 @@ class PerformanceBand extends StatelessWidget {
   final int effectiveDecisions;
   final double bandStart;
   final double bandEnd;
-  final String title;
+  final String? title;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = context.l10n;
+    final resolvedTitle = title ?? l10n.gamePerformanceEstimate;
+    final decisions = l10n.effectiveDecisionCount(effectiveDecisions);
     return Semantics(
       container: true,
-      label:
-          '$title，$lowerRank 到 $upperRank，80% 区间，$confidenceLabel，$effectiveDecisions 个有效决策',
+      label: l10n.performanceBandSemantics(
+        resolvedTitle,
+        lowerRank,
+        upperRank,
+        confidenceLabel,
+        decisions,
+      ),
       excludeSemantics: true,
       child: Card(
         child: Padding(
@@ -41,7 +50,7 @@ class PerformanceBand extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              Text(title, style: theme.textTheme.labelLarge),
+              Text(resolvedTitle, style: theme.textTheme.labelLarge),
               const SizedBox(height: GoSpacing.s2),
               Text(
                 '$lowerRank–$upperRank',
@@ -68,8 +77,8 @@ class PerformanceBand extends StatelessWidget {
                 spacing: GoSpacing.s2,
                 runSpacing: GoSpacing.s2,
                 children: <Widget>[
-                  const MetricPill(
-                    label: '80% 区间',
+                  MetricPill(
+                    label: l10n.coverageInterval(80),
                     tone: MetricTone.primary,
                     icon: Icons.horizontal_rule_rounded,
                     compact: true,
@@ -81,7 +90,7 @@ class PerformanceBand extends StatelessWidget {
                     compact: true,
                   ),
                   MetricPill(
-                    label: '$effectiveDecisions 个有效决策',
+                    label: decisions,
                     icon: Icons.data_usage_rounded,
                     compact: true,
                   ),

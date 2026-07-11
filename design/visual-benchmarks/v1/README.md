@@ -32,3 +32,13 @@ dark variation comparison, and expanded tablet review.
 The single-game performance screen intentionally has no history or permanent
 rank. The photo-result screen intentionally has no move timeline or strength
 estimate.
+
+## Collaboration mirror
+
+The repository remains the release source. A
+[Figma mirror](https://www.figma.com/design/I2WtCpezUouSAM1WyJgTyb) was
+created, but the connected Starter/View plan permits one
+variable mode and atomically rejected the required four-mode semantic token
+collection. The manifest records this as an external plan limitation; no
+partial light-only library or fake parallel collections are treated as the
+design system.

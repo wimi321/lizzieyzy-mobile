@@ -115,6 +115,7 @@ List<CapturedFrame> fakeFrames(int count) => <CapturedFrame>[
 ];
 
 ScanDraft fakeScanDraft({
+  ScanKind kind = ScanKind.physicalBoard,
   Map<BoardPoint, StoneColor>? stones,
   Set<BoardPoint>? uncertain,
 }) {
@@ -126,7 +127,7 @@ ScanDraft fakeScanDraft({
       };
   final resolvedUncertain = uncertain ?? <BoardPoint>{};
   return ScanDraft(
-    kind: ScanKind.physicalBoard,
+    kind: kind,
     boardSize: BoardSize.nineteen,
     boardBounds: const BoardQuadrilateral(
       topLeft: NormalizedPoint(0.05, 0.05),

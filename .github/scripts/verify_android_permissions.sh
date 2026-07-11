@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-APK="${1:-build/app/outputs/flutter-apk/app-debug.apk}"
+APK="${1:-build/app/outputs/flutter-apk/app-release.apk}"
 
 if [ ! -f "$APK" ]; then
   echo "APK not found: $APK" >&2
@@ -57,4 +57,24 @@ for required in android.permission.CAMERA android.permission.INTERNET; do
   fi
 done
 
-echo "Android permission allowlist verified."
+merged_manifest="$("$apkanalyzer_path" manifest print "$APK")"
+for feature in android.hardware.camera.any android.hardware.camera; do
+  camera_required="$(
+    printf '%s\n' "$merged_manifest" | awk -v expected="$feature" '
+      $0 ~ "android:name=\"" expected "\"" { camera = 1; next }
+      camera && /android:required=/ {
+        value = $0
+        sub(/^.*android:required="/, "", value)
+        sub(/".*$/, "", value)
+        print value
+        exit
+      }
+    '
+  )"
+  if [ "$camera_required" != "false" ]; then
+    echo "$feature must remain optional after manifest merge" >&2
+    exit 1
+  fi
+done
+
+echo "Android permission allowlist and optional camera feature verified."

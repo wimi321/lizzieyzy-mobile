@@ -62,12 +62,24 @@ final class FrameBundle {
 }
 
 final class NormalizedPoint {
-  const NormalizedPoint(this.x, this.y)
-    : assert(x >= 0 && x <= 1),
-      assert(y >= 0 && y <= 1);
+  const NormalizedPoint(this.x, this.y);
 
   final double x;
   final double y;
+
+  /// Enforces the normalized-coordinate contract in release builds.
+  ///
+  /// The constructor remains `const` so scan fixtures and immutable manifests
+  /// can use compile-time values. Trust boundaries such as [ScanDraft] must call
+  /// this method instead of relying on debug-only assertions.
+  void validate({String name = 'point'}) {
+    if (!x.isFinite || !y.isFinite) {
+      throw ArgumentError.value(this, name, 'Coordinates must be finite.');
+    }
+    if (x < 0 || x > 1 || y < 0 || y > 1) {
+      throw RangeError('$name must lie inside the normalized unit square.');
+    }
+  }
 }
 
 final class BoardQuadrilateral {
@@ -82,6 +94,75 @@ final class BoardQuadrilateral {
   final NormalizedPoint topRight;
   final NormalizedPoint bottomRight;
   final NormalizedPoint bottomLeft;
+
+  List<NormalizedPoint> get vertices => List<NormalizedPoint>.unmodifiable(
+    <NormalizedPoint>[topLeft, topRight, bottomRight, bottomLeft],
+  );
+
+  /// Signed area in normalized image coordinates.
+  ///
+  /// With the app's screen coordinate system (positive Y points down), a
+  /// correctly ordered top-left → top-right → bottom-right → bottom-left quad
+  /// has a positive area.
+  double get signedArea {
+    final points = vertices;
+    var twiceArea = 0.0;
+    for (var index = 0; index < points.length; index++) {
+      final current = points[index];
+      final next = points[(index + 1) % points.length];
+      twiceArea += current.x * next.y - current.y * next.x;
+    }
+    return twiceArea / 2;
+  }
+
+  bool get isConvex {
+    final points = vertices;
+    var expectedSign = 0;
+    for (var index = 0; index < points.length; index++) {
+      final a = points[index];
+      final b = points[(index + 1) % points.length];
+      final c = points[(index + 2) % points.length];
+      final cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+      if (!cross.isFinite || cross.abs() <= 1e-12) return false;
+      final sign = cross > 0 ? 1 : -1;
+      expectedSign = expectedSign == 0 ? sign : expectedSign;
+      if (sign != expectedSign) return false;
+    }
+    return expectedSign > 0;
+  }
+
+  /// Validates ordering, convexity, edge length, and usable area at the domain
+  /// trust boundary. This intentionally runs in release mode.
+  void validate({double minimumArea = 0.0001}) {
+    if (!minimumArea.isFinite || minimumArea <= 0 || minimumArea > 1) {
+      throw RangeError.range(minimumArea, 0, 1, 'minimumArea');
+    }
+    final points = vertices;
+    for (var index = 0; index < points.length; index++) {
+      points[index].validate(name: 'boardBounds[$index]');
+      final next = points[(index + 1) % points.length];
+      final dx = next.x - points[index].x;
+      final dy = next.y - points[index].y;
+      if (dx * dx + dy * dy <= 1e-8) {
+        throw ArgumentError(
+          'Board quadrilateral contains a duplicate or near-zero edge.',
+        );
+      }
+    }
+    if (!isConvex) {
+      throw ArgumentError(
+        'Board quadrilateral must be a clockwise, strictly convex polygon.',
+      );
+    }
+    final area = signedArea;
+    if (!area.isFinite || area < minimumArea) {
+      throw ArgumentError.value(
+        area,
+        'boardBounds',
+        'Board quadrilateral has insufficient usable area.',
+      );
+    }
+  }
 }
 
 enum ScanKind { physicalBoard, numberedDiagram, screenshot, unknown }
@@ -136,12 +217,20 @@ final class SequenceToken {
     required this.moveNumber,
     required this.move,
     required this.confidence,
-  }) : assert(moveNumber >= 1),
-       assert(confidence >= 0 && confidence <= 1);
+  });
 
   final int moveNumber;
   final Move move;
   final double confidence;
+
+  void validate() {
+    if (moveNumber < 1) {
+      throw RangeError.value(moveNumber, 'moveNumber', 'Must be positive.');
+    }
+    if (!confidence.isFinite || confidence < 0 || confidence > 1) {
+      throw RangeError.range(confidence, 0, 1, 'confidence');
+    }
+  }
 }
 
 final class ScanDraft {
@@ -154,6 +243,7 @@ final class ScanDraft {
     required this.boardConfidence,
   }) : intersections = List.unmodifiable(intersections),
        sequenceTokens = List.unmodifiable(sequenceTokens) {
+    boardBounds.validate();
     if (!boardConfidence.isFinite ||
         boardConfidence < 0 ||
         boardConfidence > 1) {
@@ -172,7 +262,14 @@ final class ScanDraft {
         );
       }
     }
+    final moveNumbers = <int>{};
     for (final token in sequenceTokens) {
+      token.validate();
+      if (!moveNumbers.add(token.moveNumber)) {
+        throw ArgumentError(
+          'Scan draft contains duplicate move number ${token.moveNumber}.',
+        );
+      }
       if (!token.move.isPass && !token.move.point!.isOn(boardSize)) {
         throw RangeError(
           'Sequence token ${token.moveNumber} is outside the board.',
@@ -191,9 +288,20 @@ final class ScanDraft {
   bool get hasCompleteIntersectionGrid =>
       intersections.length == boardSize.dimension * boardSize.dimension;
 
+  bool get hasContiguousNumberedSequence {
+    if (sequenceTokens.isEmpty) return false;
+    final sorted = sequenceTokens.map((token) => token.moveNumber).toList()
+      ..sort();
+    for (var index = 0; index < sorted.length; index++) {
+      if (sorted[index] != index + 1) return false;
+    }
+    return true;
+  }
+
   bool get needsCorrection =>
       boardConfidence < 0.9 ||
       !hasCompleteIntersectionGrid ||
       intersections.any((prediction) => prediction.confidence < 0.9) ||
-      sequenceTokens.any((token) => token.confidence < 0.9);
+      sequenceTokens.any((token) => token.confidence < 0.9) ||
+      (kind == ScanKind.numberedDiagram && !hasContiguousNumberedSequence);
 }

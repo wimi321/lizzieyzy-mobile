@@ -1,0 +1,136 @@
+{
+  "schemaVersion": 1,
+  "policies": [
+    {
+      "groupPrefix": "androidx.datastore",
+      "namePrefix": "datastore-preferences-external-protobuf",
+      "license": "BSD-3-Clause",
+      "licenseUrl": "https://opensource.org/licenses/BSD-3-Clause"
+    },
+    {
+      "groupPrefix": "androidx.",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://www.apache.org/licenses/LICENSE-2.0"
+    },
+    {
+      "groupPrefix": "com.getkeepsafe.relinker",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://www.apache.org/licenses/LICENSE-2.0"
+    },
+    {
+      "groupPrefix": "com.google.android.datatransport",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://www.apache.org/licenses/LICENSE-2.0"
+    },
+    {
+      "groupPrefix": "com.google.android.gms",
+      "namePrefix": "play-services-mlkit-",
+      "license": "LicenseRef-ML-Kit-Terms",
+      "licenseUrl": "https://developers.google.com/ml-kit/terms",
+      "requireEmbeddedNotices": true
+    },
+    {
+      "groupPrefix": "com.google.android.gms",
+      "license": "LicenseRef-Android-SDK-Terms",
+      "licenseUrl": "https://developer.android.com/studio/terms.html",
+      "requireEmbeddedNotices": true
+    },
+    {
+      "groupPrefix": "com.google.android.odml",
+      "license": "LicenseRef-Android-SDK-Terms",
+      "licenseUrl": "https://developer.android.com/studio/terms.html",
+      "requireEmbeddedNotices": true
+    },
+    {
+      "groupPrefix": "com.google.auto.value",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://www.apache.org/licenses/LICENSE-2.0"
+    },
+    {
+      "groupPrefix": "com.google.code.findbugs",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://www.apache.org/licenses/LICENSE-2.0"
+    },
+    {
+      "groupPrefix": "com.google.code.gson",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://www.apache.org/licenses/LICENSE-2.0"
+    },
+    {
+      "groupPrefix": "com.google.crypto.tink",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://www.apache.org/licenses/LICENSE-2.0"
+    },
+    {
+      "groupPrefix": "com.google.dagger",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://www.apache.org/licenses/LICENSE-2.0"
+    },
+    {
+      "groupPrefix": "com.google.errorprone",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://www.apache.org/licenses/LICENSE-2.0"
+    },
+    {
+      "groupPrefix": "com.google.firebase",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://www.apache.org/licenses/LICENSE-2.0"
+    },
+    {
+      "groupPrefix": "com.google.guava",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://www.apache.org/licenses/LICENSE-2.0"
+    },
+    {
+      "groupPrefix": "com.google.j2objc",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://www.apache.org/licenses/LICENSE-2.0"
+    },
+    {
+      "groupPrefix": "com.google.mlkit",
+      "license": "LicenseRef-ML-Kit-Terms",
+      "licenseUrl": "https://developers.google.com/ml-kit/terms",
+      "requireEmbeddedNotices": true
+    },
+    {
+      "groupPrefix": "com.squareup.okio",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://www.apache.org/licenses/LICENSE-2.0"
+    },
+    {
+      "groupPrefix": "io.flutter",
+      "license": "BSD-3-Clause",
+      "licenseUrl": "https://github.com/flutter/flutter/blob/master/LICENSE"
+    },
+    {
+      "groupPrefix": "jakarta.inject",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://www.apache.org/licenses/LICENSE-2.0"
+    },
+    {
+      "groupPrefix": "javax.inject",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://www.apache.org/licenses/LICENSE-2.0"
+    },
+    {
+      "groupPrefix": "org.jetbrains",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://www.apache.org/licenses/LICENSE-2.0"
+    },
+    {
+      "groupPrefix": "org.jetbrains.kotlin",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://www.apache.org/licenses/LICENSE-2.0"
+    },
+    {
+      "groupPrefix": "org.jetbrains.kotlinx",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://www.apache.org/licenses/LICENSE-2.0"
+    },
+    {
+      "groupPrefix": "org.jspecify",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://www.apache.org/licenses/LICENSE-2.0"
+    }
+  ]
+}

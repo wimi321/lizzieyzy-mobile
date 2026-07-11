@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:lizzieyzy_mobile/l10n/l10n.dart';
 
 import '../tokens.dart';
 import 'metric_pill.dart';
@@ -35,13 +36,14 @@ class KifuCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = context.l10n;
     final textScale = MediaQuery.textScalerOf(context).scale(1);
-    final statusData = _statusData;
+    final statusData = _statusData(l10n);
     final semantics = <String>[
-      title ?? '$blackPlayer 对 $whitePlayer',
-      '黑方 $blackPlayer，白方 $whitePlayer',
+      title ?? l10n.playerVersus(blackPlayer, whitePlayer),
+      l10n.playerColorsSemantics(blackPlayer, whitePlayer),
       ?subtitle,
-      if (moveCount != null) '$moveCount 手',
+      if (moveCount != null) l10n.moveCount(moveCount!),
       statusData.label,
     ].join('，');
 
@@ -72,7 +74,7 @@ class KifuCard extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: <Widget>[
                       Text(
-                        title ?? '$blackPlayer  对  $whitePlayer',
+                        title ?? l10n.playerVersus(blackPlayer, whitePlayer),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.titleMedium,
@@ -108,7 +110,10 @@ class KifuCard extends StatelessWidget {
                             compact: true,
                           ),
                           if (moveCount != null)
-                            MetricPill(label: '$moveCount 手', compact: true),
+                            MetricPill(
+                              label: l10n.moveCount(moveCount!),
+                              compact: true,
+                            ),
                         ],
                       ),
                       if (status == KifuStatus.analyzing &&
@@ -124,7 +129,7 @@ class KifuCard extends StatelessWidget {
                   Icon(
                     Icons.chevron_right_rounded,
                     color: theme.colorScheme.onSurfaceVariant,
-                    semanticLabel: '打开',
+                    semanticLabel: l10n.openAction,
                   ),
                 ],
               ],
@@ -135,24 +140,24 @@ class KifuCard extends StatelessWidget {
     );
   }
 
-  _KifuStatusData get _statusData => switch (status) {
-    KifuStatus.analyzed => const _KifuStatusData(
-      label: '已复盘',
+  _KifuStatusData _statusData(AppLocalizations l10n) => switch (status) {
+    KifuStatus.analyzed => _KifuStatusData(
+      label: l10n.kifuReviewed,
       tone: MetricTone.positive,
       icon: Icons.check_circle_outline_rounded,
     ),
-    KifuStatus.analyzing => const _KifuStatusData(
-      label: '分析中',
+    KifuStatus.analyzing => _KifuStatusData(
+      label: l10n.kifuAnalyzing,
       tone: MetricTone.primary,
       icon: Icons.pending_rounded,
     ),
-    KifuStatus.unreviewed => const _KifuStatusData(
-      label: '未复盘',
+    KifuStatus.unreviewed => _KifuStatusData(
+      label: l10n.kifuNotReviewed,
       tone: MetricTone.neutral,
       icon: Icons.circle_outlined,
     ),
-    KifuStatus.error => const _KifuStatusData(
-      label: '需要处理',
+    KifuStatus.error => _KifuStatusData(
+      label: l10n.kifuNeedsAction,
       tone: MetricTone.negative,
       icon: Icons.error_outline_rounded,
     ),

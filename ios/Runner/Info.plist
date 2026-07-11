@@ -6,6 +6,22 @@
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Go Game Record</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.wimi321.smart-game-format</string>
+				<string>com.wimi321.tygem-gib</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleDisplayName</key>
 	<string>LizzieYZY</string>
 	<key>CFBundleExecutable</key>
@@ -14,6 +30,14 @@
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>zh-Hans</string>
+		<string>zh-Hant</string>
+		<string>ja</string>
+		<string>ko</string>
+	</array>
 	<key>CFBundleName</key>
 	<string>LizzieYZY</string>
 	<key>CFBundlePackageType</key>
@@ -26,12 +50,14 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>用于拍摄围棋棋盘并识别当前局面或编号棋谱。</string>
+	<string>Use the camera to photograph a Go board and recognize the current position or a numbered game diagram on this device.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>用于连接您指定的局域网 KataGo 分析服务。</string>
+	<string>Connect to the KataGo analysis service on your local network that you configured.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>用于从相册选择围棋棋盘照片或编号棋谱图。</string>
+	<string>Select a Go board photo or numbered game diagram for recognition on this device.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
@@ -59,6 +85,47 @@
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
 	<string>Main</string>
+	<key>UTImportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.text</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Smart Game Format</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.wimi321.smart-game-format</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>sgf</string>
+				</array>
+				<key>public.mime-type</key>
+				<string>application/x-go-sgf</string>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.text</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Tygem GIB Game Record</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.wimi321.tygem-gib</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>gib</string>
+				</array>
+				<key>public.mime-type</key>
+				<string>application/x-go-gib</string>
+			</dict>
+		</dict>
+	</array>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>

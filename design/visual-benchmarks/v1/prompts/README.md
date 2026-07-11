@@ -2,6 +2,12 @@
 
 Mode: built-in `imagegen`, one call per distinct screen.
 
+[`final-prompts.json`](final-prompts.json) is the machine-checked canonical
+prompt catalog. It defines the exact deterministic assembly of the shared
+contract and each screen prompt. The built-in tool did not expose a public
+model build identifier, so the manifest records that limitation instead of
+inventing provenance.
+
 ## Shared prompt contract
 
 ```text
@@ -35,6 +41,5 @@ Avoid: glass, neon, heavy gradients/shadows, nested cards, desktop UI, watermark
   numbered 1–8 PV and `57.8% / +3.1目 / 12,840访问`.
 - `screen-10`: 1024x768 three-pane tablet review with a full-width timeline.
 
-Every generated source was inspected. Screen-specific prompts add only the
-content above and repeat the shared constraints. Full prompt provenance and
-hashes are recorded in `../manifest.json`.
+Every generated source was inspected. Full prompt provenance and the prompt
+catalog hash are recorded in `../manifest.json`.

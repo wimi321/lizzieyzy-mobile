@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lizzieyzy_mobile/application/scan/scan.dart';
 import 'package:lizzieyzy_mobile/design_system/design_system.dart';
+import 'package:lizzieyzy_mobile/domain/domain.dart' as domain;
+import 'package:lizzieyzy_mobile/l10n/l10n.dart';
 
 import '../../../app/app_routes.dart';
 
@@ -27,26 +29,41 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
   late final ScanCaptureController _controller =
       widget.controller ??
       ScanCaptureController(platform: PluginScanCapturePlatform());
+  Future<void> _cameraTransition = Future<void>.value();
+  bool? _lastRequestedCameraActive;
   bool _navigating = false;
+  bool _usingGuideFallback = false;
+  bool _disposed = false;
+  AppLifecycleState _lifecycleState = AppLifecycleState.resumed;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _controller.addListener(_onControllerChanged);
-    unawaited(_controller.initialize());
+    _lifecycleState =
+        WidgetsBinding.instance.lifecycleState ?? AppLifecycleState.resumed;
+    unawaited(
+      _requestCameraActive(_lifecycleState == AppLifecycleState.resumed),
+    );
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    _lifecycleState = state;
     switch (state) {
       case AppLifecycleState.resumed:
-        unawaited(_controller.resume());
+        if (_navigating ||
+            !mounted ||
+            ModalRoute.of(context)?.isCurrent != true) {
+          return;
+        }
+        unawaited(_requestCameraActive(true));
       case AppLifecycleState.inactive:
       case AppLifecycleState.paused:
       case AppLifecycleState.detached:
       case AppLifecycleState.hidden:
-        unawaited(_controller.suspend());
+        unawaited(_requestCameraActive(false));
     }
   }
 
@@ -56,10 +73,30 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
 
   @override
   void dispose() {
+    _disposed = true;
     WidgetsBinding.instance.removeObserver(this);
     _controller.removeListener(_onControllerChanged);
     _controller.dispose();
     super.dispose();
+  }
+
+  Future<void> _requestCameraActive(bool active) {
+    if (_disposed) return Future<void>.value();
+    if (_lastRequestedCameraActive == active) return _cameraTransition;
+    _lastRequestedCameraActive = active;
+    final operation = _cameraTransition.then((_) async {
+      if (_disposed) return;
+      if (active) {
+        await _controller.resume();
+      } else {
+        await _controller.suspend();
+      }
+    });
+    _cameraTransition = operation.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
+    return operation;
   }
 
   Future<void> _capture() async {
@@ -85,21 +122,39 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
     }
   }
 
+  Future<void> _retryWithGuide() async {
+    if (_navigating || !_controller.canUseGuideFallback) return;
+    setState(() => _usingGuideFallback = true);
+    try {
+      final payload = await _controller.retryWithGuide();
+      await _openCorrection(payload);
+    } finally {
+      if (mounted) setState(() => _usingGuideFallback = false);
+    }
+  }
+
   Future<void> _openCorrection(ScanCapturePayload? payload) async {
     if (!mounted || payload == null) return;
     _navigating = true;
     final shouldResumeCamera = _controller.phase == ScanCapturePhase.ready;
     try {
-      if (shouldResumeCamera) await _controller.suspend();
+      if (shouldResumeCamera) await _requestCameraActive(false);
       if (!mounted) return;
       await Navigator.pushNamed(
         context,
-        AppRoutes.boardCorrection,
+        payload.draft.kind == domain.ScanKind.numberedDiagram
+            ? AppRoutes.numberedCorrection
+            : AppRoutes.boardCorrection,
         arguments: payload,
       );
     } finally {
-      if (mounted && shouldResumeCamera) await _controller.resume();
       _navigating = false;
+      if (mounted &&
+          shouldResumeCamera &&
+          _lifecycleState == AppLifecycleState.resumed &&
+          ModalRoute.of(context)?.isCurrent == true) {
+        await _requestCameraActive(true);
+      }
     }
   }
 
@@ -111,12 +166,14 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen>
       onCapture: _capture,
       onPickImage: _pickImage,
       onRetry: _retry,
+      onGuideFallback: _retryWithGuide,
+      guideFallbackInProgress: _usingGuideFallback,
     );
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light,
       child: widget.embedded
           ? view
-          : Scaffold(backgroundColor: const Color(0xFF0B100D), body: view),
+          : Scaffold(backgroundColor: GoCameraColors.background, body: view),
     );
   }
 }
@@ -128,6 +185,8 @@ class _CameraCaptureView extends StatelessWidget {
     required this.onCapture,
     required this.onPickImage,
     required this.onRetry,
+    required this.onGuideFallback,
+    required this.guideFallbackInProgress,
   });
 
   final bool embedded;
@@ -135,12 +194,15 @@ class _CameraCaptureView extends StatelessWidget {
   final VoidCallback onCapture;
   final VoidCallback onPickImage;
   final VoidCallback onRetry;
+  final VoidCallback onGuideFallback;
+  final bool guideFallbackInProgress;
 
   @override
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
+    final l10n = context.l10n;
     return ColoredBox(
-      color: const Color(0xFF0B100D),
+      color: GoCameraColors.background,
       child: SafeArea(
         child: LayoutBuilder(
           builder: (context, constraints) {
@@ -157,31 +219,31 @@ class _CameraCaptureView extends StatelessWidget {
                       const SizedBox(width: GoSpacing.s2),
                       if (!embedded)
                         IconButton(
-                          tooltip: '关闭相机',
+                          tooltip: l10n.closeCamera,
                           onPressed: () => Navigator.maybePop(context),
-                          color: Colors.white,
+                          color: GoCameraColors.foreground,
                           icon: const Icon(Icons.close_rounded),
                         )
                       else
                         const SizedBox(width: GoSizes.minimumTouchTarget),
-                      const Expanded(
+                      Expanded(
                         child: Text(
-                          '拍照识谱',
+                          l10n.photoScanTitle,
                           textAlign: TextAlign.center,
                           style: TextStyle(
-                            color: Colors.white,
+                            color: GoCameraColors.foreground,
                             fontSize: 17,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
                       ),
                       IconButton(
-                        tooltip: _flashLabel(controller.flashMode),
+                        tooltip: _flashLabel(l10n, controller.flashMode),
                         onPressed: controller.phase == ScanCapturePhase.ready
                             ? controller.cycleFlash
                             : null,
-                        color: Colors.white,
-                        disabledColor: Colors.white38,
+                        color: GoCameraColors.foreground,
+                        disabledColor: GoCameraColors.foregroundDisabled,
                         icon: Icon(_flashIcon(controller.flashMode)),
                       ),
                       const SizedBox(width: GoSpacing.s2),
@@ -192,7 +254,7 @@ class _CameraCaptureView extends StatelessWidget {
                   child: Center(
                     child: Semantics(
                       image: true,
-                      label: '相机取景框，十九路棋盘需完整入框',
+                      label: l10n.cameraViewfinderSemantics,
                       child: SizedBox.square(
                         dimension: frameSide,
                         child: ClipRRect(
@@ -201,7 +263,7 @@ class _CameraCaptureView extends StatelessWidget {
                             fit: StackFit.expand,
                             children: <Widget>[
                               ColoredBox(
-                                color: const Color(0xFF090C0A),
+                                color: GoCameraColors.previewFallback,
                                 child:
                                     controller.buildPreview() ??
                                     const CustomPaint(
@@ -211,7 +273,7 @@ class _CameraCaptureView extends StatelessWidget {
                               DecoratedBox(
                                 decoration: BoxDecoration(
                                   border: Border.all(
-                                    color: const Color(0x6673CBAE),
+                                    color: GoCameraColors.guideGlow,
                                     width: 1,
                                   ),
                                   borderRadius: BorderRadius.circular(
@@ -222,24 +284,44 @@ class _CameraCaptureView extends StatelessWidget {
                               const _CornerGuides(),
                               if (controller.phase ==
                                   ScanCapturePhase.initializing)
-                                const _CameraStateOverlay(
+                                _CameraStateOverlay(
                                   icon: Icons.camera_outlined,
-                                  message: '正在启动相机…',
+                                  message: l10n.startingCamera,
                                   progress: true,
                                 ),
                               if (controller.phase ==
                                   ScanCapturePhase.recognizing)
-                                const _CameraStateOverlay(
+                                _CameraStateOverlay(
                                   icon: Icons.grid_on_rounded,
-                                  message: '正在识别 361 个交叉点…',
+                                  message: guideFallbackInProgress
+                                      ? l10n.guideFallbackRecognizing
+                                      : l10n.recognizingIntersections(361),
                                   progress: true,
                                 ),
                               if (controller.phase == ScanCapturePhase.failure)
                                 _CameraStateOverlay(
                                   icon: Icons.camera_alt_outlined,
-                                  message: controller.errorMessage ?? '相机暂时不可用',
-                                  actionLabel: '重试',
-                                  onAction: onRetry,
+                                  message: _failureMessage(
+                                    l10n,
+                                    controller.failureKind,
+                                  ),
+                                  detail: controller.canUseGuideFallback
+                                      ? l10n.guideFallbackDetail
+                                      : null,
+                                  actionLabel: controller.canUseGuideFallback
+                                      ? l10n.useGuideFallback
+                                      : l10n.retry,
+                                  onAction: controller.canUseGuideFallback
+                                      ? onGuideFallback
+                                      : onRetry,
+                                  secondaryActionLabel:
+                                      controller.canUseGuideFallback
+                                      ? l10n.retry
+                                      : null,
+                                  onSecondaryAction:
+                                      controller.canUseGuideFallback
+                                      ? onRetry
+                                      : null,
                                 ),
                             ],
                           ),
@@ -262,8 +344,9 @@ class _CameraCaptureView extends StatelessWidget {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: <Widget>[
                       _CameraAction(
+                        key: const Key('camera-photo-library-action'),
                         icon: Icons.photo_library_outlined,
-                        label: '相册',
+                        label: l10n.photoLibrary,
                         onTap: controller.phase == ScanCapturePhase.recognizing
                             ? null
                             : onPickImage,
@@ -271,7 +354,7 @@ class _CameraCaptureView extends StatelessWidget {
                       Semantics(
                         button: true,
                         enabled: controller.phase == ScanCapturePhase.ready,
-                        label: '拍照',
+                        label: l10n.capturePhoto,
                         child: InkResponse(
                           onTap: controller.phase == ScanCapturePhase.ready
                               ? onCapture
@@ -289,13 +372,13 @@ class _CameraCaptureView extends StatelessWidget {
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 border: Border.all(
-                                  color: Colors.white,
+                                  color: GoCameraColors.foreground,
                                   width: 3,
                                 ),
                               ),
                               child: const DecoratedBox(
                                 decoration: BoxDecoration(
-                                  color: Colors.white,
+                                  color: GoCameraColors.foreground,
                                   shape: BoxShape.circle,
                                 ),
                               ),
@@ -304,8 +387,9 @@ class _CameraCaptureView extends StatelessWidget {
                         ),
                       ),
                       _CameraAction(
+                        key: const Key('camera-help-action'),
                         icon: Icons.help_outline_rounded,
-                        label: '拍摄帮助',
+                        label: l10n.captureHelp,
                         onTap: () => showDialog<void>(
                           context: context,
                           builder: (context) => const _CaptureHelpDialog(),
@@ -330,55 +414,91 @@ class _AlignmentStatus extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final (icon, message, color) = switch (phase) {
       ScanCapturePhase.ready => (
         Icons.center_focus_strong_rounded,
-        '完整棋盘入框 · 保持稳定',
-        const Color(0xFF73CBAE),
+        l10n.alignmentReady,
+        GoCameraColors.guide,
       ),
       ScanCapturePhase.recognizing => (
         Icons.hourglass_top_rounded,
-        '识别中 · 请勿离开',
-        const Color(0xFFD8B77D),
+        l10n.alignmentRecognizing,
+        GoCameraColors.recognizing,
       ),
       ScanCapturePhase.failure => (
         Icons.info_outline_rounded,
-        '可改用相册继续',
-        const Color(0xFFE2B35F),
+        l10n.alignmentFallback,
+        GoCameraColors.warning,
       ),
-      _ => (Icons.camera_outlined, '正在准备取景', const Color(0xFFB6C1BA)),
+      _ => (
+        Icons.camera_outlined,
+        l10n.alignmentPreparing,
+        GoCameraColors.preparing,
+      ),
     };
+    final extraLargeText = MediaQuery.textScalerOf(context).scale(1) >= 2.5;
+    final messageForDisplay = extraLargeText
+        ? _withoutPseudoExpansion(message)
+        : message;
+    final displayedMessage = extraLargeText
+        ? messageForDisplay
+              .split(RegExp(r'\s*[·•|｜]\s*'))
+              .map((part) {
+                final words = part.trim().split(RegExp(r'\s+'));
+                return words.length > 2
+                    ? words.sublist(words.length - 2).join(' ')
+                    : part.trim();
+              })
+              .join('\n')
+        : message;
     return Semantics(
       liveRegion: true,
       label: message,
+      excludeSemantics: true,
       child: Container(
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.sizeOf(context).width - GoSpacing.s6,
+        ),
         padding: const EdgeInsets.symmetric(
           horizontal: GoSpacing.s4,
           vertical: GoSpacing.s2,
         ),
         decoration: BoxDecoration(
-          color: const Color(0xE619221D),
+          color: GoCameraColors.statusSurface,
           borderRadius: BorderRadius.circular(GoRadii.pill),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Icon(icon, color: color, size: 18),
-            const SizedBox(width: GoSpacing.s2),
-            Flexible(
-              child: Text(
-                message,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+        child: extraLargeText
+            ? Text(
+                displayedMessage,
+                key: const Key('camera-alignment-status'),
+                textAlign: TextAlign.center,
                 style: const TextStyle(
-                  color: Colors.white,
+                  color: GoCameraColors.foreground,
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
                 ),
+              )
+            : Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Icon(icon, color: color, size: 18),
+                  const SizedBox(width: GoSpacing.s2),
+                  Flexible(
+                    child: Text(
+                      displayedMessage,
+                      key: const Key('camera-alignment-status'),
+                      maxLines: 2,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: GoCameraColors.foreground,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -389,48 +509,113 @@ class _CameraStateOverlay extends StatelessWidget {
     required this.icon,
     required this.message,
     this.progress = false,
+    this.detail,
     this.actionLabel,
     this.onAction,
+    this.secondaryActionLabel,
+    this.onSecondaryAction,
   });
 
   final IconData icon;
   final String message;
   final bool progress;
+  final String? detail;
   final String? actionLabel;
   final VoidCallback? onAction;
+  final String? secondaryActionLabel;
+  final VoidCallback? onSecondaryAction;
 
   @override
   Widget build(BuildContext context) {
+    final extraLargeText = MediaQuery.textScalerOf(context).scale(1) >= 2.5;
+    final messageStyle = TextStyle(
+      color: GoCameraColors.foreground,
+      fontSize: extraLargeText ? 12 : 14,
+      height: extraLargeText ? 1 : 1.35,
+    );
+    final messageForDisplay = extraLargeText
+        ? _withoutPseudoExpansion(message)
+        : message;
+    final displayedMessage = extraLargeText && detail != null
+        ? messageForDisplay.split(RegExp(r'[，,。.．]')).first.trim()
+        : messageForDisplay;
+    final actionLabels = <(String, VoidCallback?)>[
+      if (actionLabel case final label?) (label, onAction),
+      if (secondaryActionLabel case final label?) (label, onSecondaryAction),
+    ];
     return ColoredBox(
-      color: const Color(0xB30B100D),
+      color: GoCameraColors.stateScrim,
       child: Center(
         child: Padding(
-          padding: const EdgeInsets.all(GoSpacing.s5),
+          padding: EdgeInsets.all(extraLargeText ? GoSpacing.s2 : GoSpacing.s5),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              Icon(
-                progress ? Icons.hourglass_top_rounded : icon,
-                color: progress ? const Color(0xFF73CBAE) : Colors.white,
-                size: 30,
-              ),
-              const SizedBox(height: GoSpacing.s3),
-              Text(
-                message,
-                textAlign: TextAlign.center,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                  height: 1.35,
+              if (!extraLargeText) ...<Widget>[
+                Icon(
+                  progress ? Icons.hourglass_top_rounded : icon,
+                  color: progress
+                      ? GoCameraColors.guide
+                      : GoCameraColors.foreground,
+                  size: 30,
+                ),
+                const SizedBox(height: GoSpacing.s3),
+              ],
+              Semantics(
+                label: message,
+                excludeSemantics: true,
+                child: Text(
+                  displayedMessage,
+                  key: const Key('camera-state-message'),
+                  textAlign: TextAlign.center,
+                  maxLines: extraLargeText ? 2 : 3,
+                  style: messageStyle,
                 ),
               ),
-              if (actionLabel != null) ...<Widget>[
-                const SizedBox(height: GoSpacing.s3),
-                FilledButton.tonal(
-                  onPressed: onAction,
-                  child: Text(actionLabel!),
+              if (detail case final detail?) ...<Widget>[
+                SizedBox(height: extraLargeText ? GoSpacing.s1 : GoSpacing.s2),
+                Text(
+                  extraLargeText ? _withoutPseudoExpansion(detail) : detail,
+                  key: const Key('camera-state-detail'),
+                  textAlign: TextAlign.center,
+                  maxLines: 3,
+                  style: messageStyle.copyWith(
+                    color: GoCameraColors.foregroundMuted,
+                  ),
+                ),
+              ],
+              if (actionLabels.isNotEmpty) ...<Widget>[
+                SizedBox(height: extraLargeText ? GoSpacing.s1 : GoSpacing.s3),
+                Row(
+                  children: <Widget>[
+                    for (
+                      var index = 0;
+                      index < actionLabels.length;
+                      index++
+                    ) ...<Widget>[
+                      if (index > 0) const SizedBox(width: GoSpacing.s1),
+                      Expanded(
+                        child: FilledButton.tonal(
+                          key: Key('camera-state-action-$index'),
+                          onPressed: actionLabels[index].$2,
+                          child: Text(
+                            extraLargeText
+                                ? _withoutPseudoExpansion(
+                                    actionLabels[index].$1,
+                                  )
+                                : actionLabels[index].$1,
+                            maxLines: 2,
+                            textAlign: TextAlign.center,
+                            style: extraLargeText
+                                ? Theme.of(
+                                    context,
+                                  ).textTheme.labelSmall?.copyWith(height: 1)
+                                : null,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ],
             ],
@@ -446,6 +631,7 @@ class _CameraAction extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.onTap,
+    super.key,
   });
 
   final IconData icon;
@@ -454,27 +640,54 @@ class _CameraAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final textScale = MediaQuery.textScalerOf(context).scale(1);
+    final largeText = textScale >= 1.6;
+    final extraLargeText = textScale >= 2.5;
+    final compactLabel = _withoutPseudoExpansion(label);
+    final displayedLabel = extraLargeText
+        ? compactLabel.trim().split(RegExp(r'\s+')).last
+        : label;
     return Semantics(
       button: true,
       enabled: onTap != null,
       label: label,
+      excludeSemantics: true,
       child: InkResponse(
         onTap: onTap,
-        radius: 32,
+        radius: extraLargeText
+            ? 56
+            : largeText
+            ? 40
+            : 32,
         child: SizedBox(
-          width: 72,
-          height: 68,
+          width: extraLargeText
+              ? 120
+              : largeText
+              ? 88
+              : 72,
+          height: extraLargeText
+              ? 112
+              : largeText
+              ? 76
+              : 68,
           child: Opacity(
             opacity: onTap == null ? 0.45 : 1,
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: <Widget>[
-                Icon(icon, color: Colors.white, size: 24),
-                const SizedBox(height: 2),
+                if (!extraLargeText) ...<Widget>[
+                  Icon(icon, color: GoCameraColors.foreground, size: 24),
+                  const SizedBox(height: 2),
+                ],
                 Text(
-                  label,
-                  maxLines: 1,
-                  style: const TextStyle(color: Colors.white, fontSize: 11),
+                  displayedLabel,
+                  key: const Key('camera-action-label'),
+                  maxLines: 2,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: GoCameraColors.foreground,
+                    fontSize: 11,
+                  ),
                 ),
               ],
             ),
@@ -485,29 +698,53 @@ class _CameraAction extends StatelessWidget {
   }
 }
 
+String _withoutPseudoExpansion(String value) {
+  final match = RegExp(r'⟦([\s\S]*?)⟧').firstMatch(value);
+  return match?.group(1) ?? value;
+}
+
 class _CaptureHelpDialog extends StatelessWidget {
   const _CaptureHelpDialog();
 
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('拍摄完整棋盘'),
-      content: const Text('让四个角都在绿色框内，镜头尽量正对棋盘，并避开棋子上的强反光。'),
+      title: Text(context.l10n.captureHelpTitle),
+      content: Text(context.l10n.captureHelpBody),
       actions: <Widget>[
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('知道了'),
+          child: Text(context.l10n.gotIt),
         ),
       ],
     );
   }
 }
 
-String _flashLabel(ScanFlashMode mode) => switch (mode) {
-  ScanFlashMode.automatic => '闪光灯，自动',
-  ScanFlashMode.off => '闪光灯，关闭',
-  ScanFlashMode.on => '闪光灯，开启',
+String _flashLabel(AppLocalizations l10n, ScanFlashMode mode) => switch (mode) {
+  ScanFlashMode.automatic => l10n.flashAutomatic,
+  ScanFlashMode.off => l10n.flashOff,
+  ScanFlashMode.on => l10n.flashOn,
 };
+
+String _failureMessage(AppLocalizations l10n, ScanCaptureFailureKind? kind) =>
+    switch (kind) {
+      ScanCaptureFailureKind.cameraPermissionDenied =>
+        l10n.cameraPermissionDenied,
+      ScanCaptureFailureKind.cameraRestricted => l10n.cameraRestricted,
+      ScanCaptureFailureKind.cameraUnavailable => l10n.cameraUnavailable,
+      ScanCaptureFailureKind.cameraCaptureFailed => l10n.cameraCaptureFailed,
+      ScanCaptureFailureKind.photoLibraryPermissionDenied =>
+        l10n.photoLibraryPermissionDenied,
+      ScanCaptureFailureKind.photoLibraryUnavailable =>
+        l10n.photoLibraryUnavailable,
+      ScanCaptureFailureKind.selectedImageUnreadable =>
+        l10n.selectedImageUnreadable,
+      ScanCaptureFailureKind.recognitionIncompleteBoard =>
+        l10n.recognitionIncompleteBoard,
+      ScanCaptureFailureKind.recognitionFailed => l10n.recognitionFailed,
+      null => l10n.cameraTemporarilyUnavailable,
+    };
 
 IconData _flashIcon(ScanFlashMode mode) => switch (mode) {
   ScanFlashMode.automatic => Icons.flash_auto_rounded,
@@ -522,7 +759,7 @@ class _CornerGuides extends StatelessWidget {
   Widget build(BuildContext context) {
     return IgnorePointer(
       child: CustomPaint(
-        painter: _CornerPainter(color: const Color(0xFF73CBAE)),
+        painter: const _CornerPainter(color: GoCameraColors.guide),
       ),
     );
   }
@@ -579,11 +816,14 @@ class _CameraBoardPainter extends CustomPainter {
       ..shader = const LinearGradient(
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
-        colors: <Color>[Color(0xFF725B3E), Color(0xFFB18E5A)],
+        colors: <Color>[
+          GoCameraColors.previewWoodDark,
+          GoCameraColors.previewWoodLight,
+        ],
       ).createShader(Offset.zero & size);
     canvas.drawRect(Offset.zero & size, background);
     final gridPaint = Paint()
-      ..color = const Color(0xC83F3022)
+      ..color = GoCameraColors.previewGrid
       ..strokeWidth = 0.75;
     final inset = size.width * 0.065;
     final step = (size.width - inset * 2) / 18;

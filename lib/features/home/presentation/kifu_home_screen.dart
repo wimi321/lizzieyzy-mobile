@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:lizzieyzy_mobile/application/inbound_kifu_controller.dart';
 import 'package:lizzieyzy_mobile/application/kifu_workspace.dart';
 import 'package:lizzieyzy_mobile/design_system/design_system.dart';
 import 'package:lizzieyzy_mobile/domain/domain.dart' as domain;
+import 'package:lizzieyzy_mobile/infrastructure/kifu/kifu.dart';
+import 'package:lizzieyzy_mobile/l10n/l10n.dart';
 
 import '../../../app/app_routes.dart';
 import '../../common/presentation/feature_chrome.dart';
-import '../../fixtures/ui_fixtures.dart';
-import '../../fixtures/ui_models.dart';
 
 class KifuHomeScreen extends StatelessWidget {
   const KifuHomeScreen({super.key, this.embedded = false});
@@ -26,35 +27,42 @@ class KifuHomeView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final maxWidth = MediaQuery.sizeOf(context).width >= 840 ? 760.0 : 680.0;
     final textScale = MediaQuery.textScalerOf(context).scale(1);
     final largeTextMode = textScale >= 1.75;
-    final extraLargeTextMode = textScale >= 2.75;
     final imported =
         KifuWorkspace.maybeOf(context)?.notifier?.documents ??
         const <domain.KifuDocument>[];
-    final recent = <({KifuSummaryModel item, String route})>[
+    final inbound = InboundKifuScope.maybeOf(context);
+    final showInboundNotice =
+        inbound?.status == InboundKifuStatus.imported ||
+        inbound?.status == InboundKifuStatus.failed;
+    final inboundDocumentId = inbound?.status == InboundKifuStatus.imported
+        ? inbound?.lastDocument?.id
+        : null;
+    final recent = <({_KifuSummary item, domain.KifuDocument document})>[
       for (final document in imported)
-        (item: _summaryFor(document), route: _routeFor(document)),
-      for (final item in UiFixtures.recentKifu)
-        (item: item, route: AppRoutes.keyMoveReview),
+        if (document.id != inboundDocumentId)
+          (item: _summaryFor(context, document, l10n), document: document),
     ];
     return Column(
       key: const Key('kifu-home-viewport'),
       children: <Widget>[
         FeatureTopBar(
-          title: '棋谱',
-          subtitle: 'LIZZIEYZY · 把每一盘复盘清楚',
+          title: l10n.kifuTab,
+          subtitle: l10n.homeSubtitle,
           actions: <Widget>[
             IconButton(
-              tooltip: '导入棋谱',
+              tooltip: l10n.importKifuTooltip,
               onPressed: () =>
                   Navigator.pushNamed(context, AppRoutes.importKifu),
               icon: const Icon(Icons.file_download_outlined),
             ),
             IconButton(
-              tooltip: '设置',
-              onPressed: () {},
+              tooltip: l10n.settingsTooltip,
+              onPressed: () =>
+                  Navigator.pushNamed(context, AppRoutes.settingsHome),
               icon: const Icon(Icons.tune_rounded),
             ),
           ],
@@ -68,7 +76,9 @@ class KifuHomeView extends StatelessWidget {
                 // for complete (unclamped) glyphs and full-size touch targets.
                 // The ordinary layout continues to show two recent games.
                 final dense = constraints.maxHeight < 600 || largeTextMode;
-                final recentCount = largeTextMode ? 1 : 2;
+                final recentCount = showInboundNotice
+                    ? (largeTextMode ? 0 : 1)
+                    : (largeTextMode ? 1 : 2);
                 final gap = dense ? GoSpacing.s2 : GoSpacing.s3;
                 return Padding(
                   padding: EdgeInsets.fromLTRB(
@@ -90,57 +100,51 @@ class KifuHomeView extends StatelessWidget {
                                 Navigator.pushNamed(context, AppRoutes.camera),
                           ),
                           SizedBox(height: gap),
-                          if (!extraLargeTextMode) ...<Widget>[
-                            const SectionHeading(title: '正在分析'),
-                            const SizedBox(height: GoSpacing.s2),
-                            _ActiveAnalysisCard(
-                              dense: dense,
-                              onTap: () => Navigator.pushNamed(
-                                context,
-                                AppRoutes.analysisProgress,
-                              ),
-                            ),
-                            SizedBox(height: gap),
-                          ],
-                          SectionHeading(
-                            title: '最近棋谱',
-                            trailing: extraLargeTextMode
-                                ? Semantics(
-                                    button: true,
-                                    label: '查看正在分析的棋谱',
-                                    excludeSemantics: true,
-                                    onTap: () => Navigator.pushNamed(
-                                      context,
-                                      AppRoutes.analysisProgress,
-                                    ),
-                                    child: IconButton(
-                                      tooltip: '查看正在分析的棋谱',
-                                      onPressed: () => Navigator.pushNamed(
-                                        context,
-                                        AppRoutes.analysisProgress,
-                                      ),
-                                      icon: const Icon(
-                                        Icons.analytics_outlined,
-                                      ),
-                                    ),
-                                  )
-                                : TextButton(
-                                    onPressed: () {},
-                                    child: const Text('查看全部'),
-                                  ),
-                          ),
+                          SectionHeading(title: l10n.recentKifu),
                           const SizedBox(height: GoSpacing.s1),
-                          for (final entry in recent.take(
-                            recentCount,
-                          )) ...<Widget>[
-                            _KifuTile(
-                              dense: dense,
-                              item: entry.item,
-                              onTap: () =>
-                                  Navigator.pushNamed(context, entry.route),
+                          if (showInboundNotice) ...<Widget>[
+                            _InboundKifuNotice(
+                              controller: inbound!,
+                              onOpen: inbound.lastDocument == null
+                                  ? null
+                                  : () {
+                                      final document = inbound.lastDocument!;
+                                      KifuWorkspace.of(
+                                        context,
+                                      ).select(document);
+                                      Navigator.pushNamed(
+                                        context,
+                                        AppRoutes.routeForDocument(document),
+                                        arguments: document,
+                                      );
+                                    },
                             ),
-                            const SizedBox(height: GoSpacing.s2),
+                            if (recentCount > 0 && recent.isNotEmpty)
+                              const SizedBox(height: GoSpacing.s2),
                           ],
+                          if (recent.isEmpty &&
+                              inbound?.status != InboundKifuStatus.imported)
+                            _EmptyKifuLibrary(dense: dense)
+                          else
+                            for (final entry in recent.take(
+                              recentCount,
+                            )) ...<Widget>[
+                              _KifuTile(
+                                dense: dense,
+                                item: entry.item,
+                                onTap: () {
+                                  KifuWorkspace.of(
+                                    context,
+                                  ).select(entry.document);
+                                  Navigator.pushNamed(
+                                    context,
+                                    AppRoutes.routeForDocument(entry.document),
+                                    arguments: entry.document,
+                                  );
+                                },
+                              ),
+                              const SizedBox(height: GoSpacing.s2),
+                            ],
                         ],
                       ),
                     ),
@@ -154,32 +158,146 @@ class KifuHomeView extends StatelessWidget {
     );
   }
 
-  static KifuSummaryModel _summaryFor(domain.KifuDocument document) {
+  static _KifuSummary _summaryFor(
+    BuildContext context,
+    domain.KifuDocument document,
+    AppLocalizations l10n,
+  ) {
     final metadata = document.metadata;
     final (moves, status) = switch (document) {
-      domain.VerifiedGameRecord(:final moves) => (moves.length, '已校验'),
-      domain.PartialGameRecord(:final moves) => (moves.length, '需确认'),
-      domain.PositionSnapshot() => (0, '当前局面'),
+      domain.VerifiedGameRecord(:final moves) => (
+        moves.length,
+        l10n.statusVerified,
+      ),
+      domain.PartialGameRecord(:final moves) => (
+        moves.length,
+        l10n.statusNeedsConfirmation,
+      ),
+      domain.PositionSnapshot() => (0, l10n.statusCurrentPosition),
     };
-    return KifuSummaryModel(
-      blackPlayer: metadata.blackPlayer ?? '黑方',
-      whitePlayer: metadata.whitePlayer ?? '白方',
+    final playedAt = metadata.playedAt;
+    return _KifuSummary(
+      blackPlayer: metadata.blackPlayer ?? l10n.blackPlayerFallback,
+      whitePlayer: metadata.whitePlayer ?? l10n.whitePlayerFallback,
       result: switch (document) {
-        domain.VerifiedGameRecord() => '完整棋谱',
-        domain.PartialGameRecord() => '片段棋谱',
-        domain.PositionSnapshot() => '照片局面',
+        domain.VerifiedGameRecord() => l10n.completeKifu,
+        domain.PartialGameRecord() => l10n.partialKifu,
+        domain.PositionSnapshot() => l10n.photoPosition,
       },
-      playedAt: '刚刚导入',
+      // A persisted record is not necessarily newly imported. Only display a
+      // date when the source actually supplied one instead of inventing a
+      // relative timestamp.
+      playedAt: playedAt == null
+          ? null
+          : MaterialLocalizations.of(
+              context,
+            ).formatCompactDate(playedAt.toLocal()),
       moveCount: moves,
       status: status,
     );
   }
+}
 
-  static String _routeFor(domain.KifuDocument document) => switch (document) {
-    domain.VerifiedGameRecord() => AppRoutes.analysisProgress,
-    domain.PartialGameRecord() => AppRoutes.numberedCorrection,
-    domain.PositionSnapshot() => AppRoutes.positionAnalysis,
-  };
+class _InboundKifuNotice extends StatelessWidget {
+  const _InboundKifuNotice({required this.controller, required this.onOpen});
+
+  final InboundKifuController controller;
+  final VoidCallback? onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final theme = Theme.of(context);
+    final imported = controller.status == InboundKifuStatus.imported;
+    final fileName = controller.lastFileName ?? l10n.sharedKifuFallback;
+    final textEncoding = controller.lastTextEncoding;
+    final legacyEncoding =
+        textEncoding != null && textEncoding != KifuTextEncoding.utf8
+        ? l10n.legacyGibEncodingDetected(textEncoding.label)
+        : null;
+    final warningSummary = <String>[
+      ?legacyEncoding,
+      if (controller.warnings.isNotEmpty)
+        l10n.warningCount(controller.warnings.length),
+    ].join(' · ');
+    final message = imported
+        ? warningSummary.isEmpty
+              ? l10n.inboundImported(fileName)
+              : l10n.inboundImportedWithWarnings(fileName, warningSummary)
+        : switch (controller.failureCode) {
+            InboundKifuFailureCode.invalidFile => l10n.inboundInvalidFile,
+            InboundKifuFailureCode.storage => l10n.inboundStorageFailure,
+            InboundKifuFailureCode.platform ||
+            null => l10n.inboundPlatformFailure,
+          };
+    final foreground = imported
+        ? theme.colorScheme.onPrimaryContainer
+        : theme.colorScheme.onErrorContainer;
+    return SurfacePanel(
+      padding: EdgeInsets.zero,
+      color: imported
+          ? theme.colorScheme.primaryContainer
+          : theme.colorScheme.errorContainer,
+      child: Row(
+        children: <Widget>[
+          Expanded(
+            child: Semantics(
+              liveRegion: true,
+              button: onOpen != null,
+              label: onOpen == null ? message : l10n.inboundOpen(fileName),
+              excludeSemantics: true,
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: onOpen,
+                  borderRadius: BorderRadius.circular(GoRadii.card),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      minHeight: GoSizes.comfortableTouchTarget,
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: GoSpacing.s3,
+                        vertical: GoSpacing.s2,
+                      ),
+                      child: Row(
+                        children: <Widget>[
+                          Icon(
+                            imported
+                                ? Icons.check_circle_outline_rounded
+                                : Icons.error_outline_rounded,
+                            color: foreground,
+                            size: 20,
+                          ),
+                          const SizedBox(width: GoSpacing.s2),
+                          Expanded(
+                            child: Text(
+                              message,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: foreground,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: l10n.dismissNotice,
+            onPressed: controller.clearNotice,
+            color: foreground,
+            icon: const Icon(Icons.close_rounded),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _ScanHeroCard extends StatelessWidget {
@@ -194,7 +312,7 @@ class _ScanHeroCard extends StatelessWidget {
     final iconSize = dense ? 44.0 : 48.0;
     return Semantics(
       button: true,
-      label: '拍照识谱，打开相机识别棋盘',
+      label: context.l10n.photoScanSemantics,
       child: Material(
         color: theme.colorScheme.primary,
         borderRadius: BorderRadius.circular(GoRadii.large),
@@ -224,7 +342,7 @@ class _ScanHeroCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
                       Text(
-                        '拍照识谱',
+                        context.l10n.photoScanTitle,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.titleLarge?.copyWith(
@@ -232,7 +350,7 @@ class _ScanHeroCard extends StatelessWidget {
                         ),
                       ),
                       Text(
-                        '实体棋盘 · 编号棋谱图',
+                        context.l10n.photoScanSubtitle,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.bodySmall?.copyWith(
@@ -257,60 +375,37 @@ class _ScanHeroCard extends StatelessWidget {
   }
 }
 
-class _ActiveAnalysisCard extends StatelessWidget {
-  const _ActiveAnalysisCard({required this.dense, required this.onTap});
+class _EmptyKifuLibrary extends StatelessWidget {
+  const _EmptyKifuLibrary({required this.dense});
 
   final bool dense;
-  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    const value = 142 / 236;
+    final largeText = MediaQuery.textScalerOf(context).scale(1) >= 1.6;
     return SurfacePanel(
-      padding: EdgeInsets.zero,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(GoRadii.card),
-        child: Padding(
-          padding: EdgeInsets.all(dense ? GoSpacing.s3 : GoSpacing.s4),
-          child: Row(
-            children: <Widget>[
-              Semantics(
-                label: '分析进度百分之六十',
-                excludeSemantics: true,
-                child: SizedBox.square(
-                  dimension: dense ? 44 : 48,
-                  child: Stack(
-                    alignment: Alignment.center,
-                    children: <Widget>[
-                      const CircularProgressIndicator(
-                        value: value,
-                        strokeWidth: 4,
-                      ),
-                      Text('60%', style: theme.textTheme.labelSmall),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(width: GoSpacing.s4),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Text('棋路未央  vs  山海一局', style: theme.textTheme.titleSmall),
-                    const SizedBox(height: GoSpacing.s1),
-                    Text(
-                      '标准分析 · 142 / 236 手',
-                      style: theme.textTheme.bodySmall,
-                    ),
-                  ],
-                ),
-              ),
-              const Icon(Icons.chevron_right_rounded),
-            ],
+      padding: EdgeInsets.all(dense ? GoSpacing.s3 : GoSpacing.s4),
+      child: Row(
+        children: <Widget>[
+          Icon(
+            Icons.description_outlined,
+            color: Theme.of(context).colorScheme.primary,
           ),
-        ),
+          const SizedBox(width: GoSpacing.s3),
+          Expanded(
+            child: Text(
+              context.l10n.emptyKifuLibrary,
+              maxLines: largeText ? 2 : 3,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: GoSpacing.s2),
+          IconButton(
+            tooltip: context.l10n.importFirstKifu,
+            onPressed: () => Navigator.pushNamed(context, AppRoutes.importKifu),
+            icon: const Icon(Icons.add_rounded),
+          ),
+        ],
       ),
     );
   }
@@ -324,17 +419,21 @@ class _KifuTile extends StatelessWidget {
   });
 
   final bool dense;
-  final KifuSummaryModel item;
+  final _KifuSummary item;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final active = item.analysisProgress != null;
     return Semantics(
       button: true,
-      label:
-          '${item.blackPlayer} 对 ${item.whitePlayer}，${item.result}，${item.moveCount}手，${item.status}',
+      label: context.l10n.kifuCardSemantics(
+        item.blackPlayer,
+        item.whitePlayer,
+        item.result,
+        context.l10n.moveCount(item.moveCount),
+        item.status,
+      ),
       child: SurfacePanel(
         padding: EdgeInsets.zero,
         child: InkWell(
@@ -355,14 +454,23 @@ class _KifuTile extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
                       Text(
-                        '${item.blackPlayer}  ·  ${item.whitePlayer}',
+                        context.l10n.playerPair(
+                          item.blackPlayer,
+                          item.whitePlayer,
+                        ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.titleSmall,
                       ),
                       const SizedBox(height: GoSpacing.s1),
                       Text(
-                        '${item.result} · ${item.moveCount}手 · ${item.playedAt}',
+                        item.playedAt == null
+                            ? '${item.result} · ${context.l10n.moveCount(item.moveCount)}'
+                            : context.l10n.kifuCardDetail(
+                                item.result,
+                                context.l10n.moveCount(item.moveCount),
+                                item.playedAt!,
+                              ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.bodySmall,
@@ -377,9 +485,7 @@ class _KifuTile extends StatelessWidget {
                     Text(
                       item.status,
                       style: theme.textTheme.labelSmall?.copyWith(
-                        color: active
-                            ? theme.colorScheme.primary
-                            : theme.colorScheme.onSurfaceVariant,
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
                     ),
                     const SizedBox(height: GoSpacing.s2),
@@ -393,6 +499,25 @@ class _KifuTile extends StatelessWidget {
       ),
     );
   }
+}
+
+@immutable
+final class _KifuSummary {
+  const _KifuSummary({
+    required this.blackPlayer,
+    required this.whitePlayer,
+    required this.result,
+    required this.playedAt,
+    required this.moveCount,
+    required this.status,
+  });
+
+  final String blackPlayer;
+  final String whitePlayer;
+  final String result;
+  final String? playedAt;
+  final int moveCount;
+  final String status;
 }
 
 class _StoneAvatar extends StatelessWidget {

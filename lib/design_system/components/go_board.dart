@@ -1,7 +1,9 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
+import 'package:lizzieyzy_mobile/l10n/l10n.dart';
 
 import '../tokens.dart';
 import 'candidate_marker.dart';
@@ -37,6 +39,16 @@ class BoardStone {
   final BoardPoint point;
   final StoneColor color;
   final int? moveNumber;
+
+  @override
+  bool operator ==(Object other) =>
+      other is BoardStone &&
+      other.point == point &&
+      other.color == color &&
+      other.moveNumber == moveNumber;
+
+  @override
+  int get hashCode => Object.hash(point, color, moveNumber);
 }
 
 @immutable
@@ -52,6 +64,17 @@ class BoardCandidate {
   final String label;
   final String? detail;
   final CandidateTone tone;
+
+  @override
+  bool operator ==(Object other) =>
+      other is BoardCandidate &&
+      other.point == point &&
+      other.label == label &&
+      other.detail == detail &&
+      other.tone == tone;
+
+  @override
+  int get hashCode => Object.hash(point, label, detail, tone);
 }
 
 /// A square, custom-painted Go board exposed to screen readers as one
@@ -66,7 +89,7 @@ class GoBoard extends StatefulWidget {
     this.selectedPoint,
     this.onIntersectionTap,
     this.onSelectionChanged,
-    this.semanticLabel = '围棋棋盘',
+    this.semanticLabel,
     this.showCoordinates = false,
   }) : assert(boardSize >= 2 && boardSize <= 25);
 
@@ -77,7 +100,7 @@ class GoBoard extends StatefulWidget {
   final BoardPoint? selectedPoint;
   final ValueChanged<BoardPoint>? onIntersectionTap;
   final ValueChanged<BoardPoint>? onSelectionChanged;
-  final String semanticLabel;
+  final String? semanticLabel;
   final bool showCoordinates;
 
   @override
@@ -129,20 +152,59 @@ class _GoBoardState extends State<GoBoard> {
     widget.onIntersectionTap?.call(point);
   }
 
+  String _describePoint(BoardPoint point, AppLocalizations l10n) {
+    BoardStone? stone;
+    for (final candidate in widget.stones) {
+      if (candidate.point == point) {
+        stone = candidate;
+        break;
+      }
+    }
+    BoardCandidate? candidate;
+    for (final item in widget.candidates) {
+      if (item.point == point) {
+        candidate = item;
+        break;
+      }
+    }
+    final description = <String>[
+      point.coordinate(widget.boardSize),
+      if (stone == null)
+        l10n.emptyPoint
+      else ...<String>[
+        stone.color == StoneColor.black
+            ? l10n.blackStoneLabel
+            : l10n.whiteStoneLabel,
+        if (stone.moveNumber != null) l10n.moveOrdinal(stone.moveNumber!),
+      ],
+      if (widget.lastMove == point)
+        l10n.lastMoveAt(point.coordinate(widget.boardSize)),
+      if (candidate != null)
+        candidate.detail == null
+            ? l10n.candidateSemantics(candidate.label)
+            : l10n.candidateSemanticsWithDetail(
+                candidate.label,
+                candidate.detail!,
+              ),
+    ];
+    return description.join(l10n.semanticSeparator);
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = context.goColors;
+    final l10n = context.l10n;
     final actions = <CustomSemanticsAction, VoidCallback>{
-      const CustomSemanticsAction(label: '向左移动'): () => _moveSelection(-1, 0),
-      const CustomSemanticsAction(label: '向右移动'): () => _moveSelection(1, 0),
-      const CustomSemanticsAction(label: '向上移动'): () => _moveSelection(0, -1),
-      const CustomSemanticsAction(label: '向下移动'): () => _moveSelection(0, 1),
+      CustomSemanticsAction(label: l10n.moveLeft): () => _moveSelection(-1, 0),
+      CustomSemanticsAction(label: l10n.moveRight): () => _moveSelection(1, 0),
+      CustomSemanticsAction(label: l10n.moveUp): () => _moveSelection(0, -1),
+      CustomSemanticsAction(label: l10n.moveDown): () => _moveSelection(0, 1),
     };
     final lastMoveDescription = widget.lastMove == null
-        ? '没有最后一手标记'
-        : '最后一手 ${widget.lastMove!.coordinate(widget.boardSize)}';
+        ? l10n.noLastMove
+        : l10n.lastMoveAt(widget.lastMove!.coordinate(widget.boardSize));
     final candidatesDescription = widget.candidates.isEmpty
-        ? '没有候选点'
+        ? l10n.noCandidatePoints
         : widget.candidates
               .take(3)
               .map(
@@ -150,17 +212,29 @@ class _GoBoardState extends State<GoBoard> {
                     '${candidate.label} ${candidate.point.coordinate(widget.boardSize)}'
                     '${candidate.detail == null ? '' : ' ${candidate.detail}'}',
               )
-              .join('，');
+              .join(l10n.semanticSeparator);
+    final blackCount = widget.stones
+        .where((stone) => stone.color == StoneColor.black)
+        .length;
+    final whiteCount = widget.stones
+        .where((stone) => stone.color == StoneColor.white)
+        .length;
 
     return Semantics(
       container: true,
       focusable: true,
-      label: widget.semanticLabel,
-      value:
-          '${widget.boardSize}路，黑棋 ${widget.stones.where((s) => s.color == StoneColor.black).length} 子，'
-          '白棋 ${widget.stones.where((s) => s.color == StoneColor.white).length} 子，'
-          '$lastMoveDescription，$candidatesDescription。当前 ${_semanticPoint.coordinate(widget.boardSize)}',
-      hint: '使用自定义方向操作移动交叉点${widget.onIntersectionTap == null ? '' : '，双击选择'}',
+      label: widget.semanticLabel ?? l10n.goBoardLabel,
+      value: l10n.boardSemanticsValue(
+        widget.boardSize,
+        blackCount,
+        whiteCount,
+        lastMoveDescription,
+        candidatesDescription,
+        _describePoint(_semanticPoint, l10n),
+      ),
+      hint: widget.onIntersectionTap == null
+          ? l10n.boardNavigationHint
+          : l10n.boardNavigationSelectHint,
       onTap: widget.onIntersectionTap == null
           ? null
           : () => _select(_semanticPoint),
@@ -183,15 +257,17 @@ class _GoBoardState extends State<GoBoard> {
                         ).nearestPoint(details.localPosition),
                       );
                     },
-              child: CustomPaint(
-                painter: GoBoardPainter(
-                  boardSize: widget.boardSize,
-                  stones: widget.stones,
-                  candidates: widget.candidates,
-                  lastMove: widget.lastMove,
-                  selectedPoint: widget.selectedPoint ?? _semanticPoint,
-                  colors: colors,
-                  showCoordinates: widget.showCoordinates,
+              child: RepaintBoundary(
+                child: CustomPaint(
+                  painter: GoBoardPainter(
+                    boardSize: widget.boardSize,
+                    stones: widget.stones,
+                    candidates: widget.candidates,
+                    lastMove: widget.lastMove,
+                    selectedPoint: _semanticPoint,
+                    colors: colors,
+                    showCoordinates: widget.showCoordinates,
+                  ),
                 ),
               ),
             );
@@ -264,31 +340,28 @@ class GoBoardPainter extends CustomPainter {
       _paintCoordinates(canvas, geometry);
     }
 
+    final shadowPaint = Paint()..color = colors.shadow;
+    final blackStonePaint = Paint()..color = colors.blackStone;
+    final whiteStonePaint = Paint()..color = colors.whiteStone;
+    final whiteStoneOutlinePaint = Paint()
+      ..color = colors.whiteStoneOutline
+      ..strokeWidth = math.max(0.8, geometry.step * 0.035)
+      ..style = PaintingStyle.stroke;
     for (final stone in stones) {
       final center = geometry.offset(stone.point);
       final radius = geometry.step * 0.455;
       canvas.drawCircle(
         center.translate(0, geometry.step * 0.055),
         radius,
-        Paint()..color = colors.shadow,
+        shadowPaint,
       );
       canvas.drawCircle(
         center,
         radius,
-        Paint()
-          ..color = stone.color == StoneColor.black
-              ? colors.blackStone
-              : colors.whiteStone,
+        stone.color == StoneColor.black ? blackStonePaint : whiteStonePaint,
       );
       if (stone.color == StoneColor.white) {
-        canvas.drawCircle(
-          center,
-          radius,
-          Paint()
-            ..color = colors.whiteStoneOutline
-            ..strokeWidth = math.max(0.8, geometry.step * 0.035)
-            ..style = PaintingStyle.stroke,
-        );
+        canvas.drawCircle(center, radius, whiteStoneOutlinePaint);
       }
     }
 
@@ -399,8 +472,8 @@ class GoBoardPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant GoBoardPainter oldDelegate) {
     return oldDelegate.boardSize != boardSize ||
-        oldDelegate.stones != stones ||
-        oldDelegate.candidates != candidates ||
+        !listEquals(oldDelegate.stones, stones) ||
+        !listEquals(oldDelegate.candidates, candidates) ||
         oldDelegate.lastMove != lastMove ||
         oldDelegate.selectedPoint != selectedPoint ||
         oldDelegate.colors != colors ||

@@ -1,0 +1,3 @@
+"NSCameraUsageDescription" = "Use the camera to photograph a Go board and recognize the current position or a numbered game diagram on this device.";
+"NSPhotoLibraryUsageDescription" = "Select a Go board photo or numbered game diagram for recognition on this device.";
+"NSLocalNetworkUsageDescription" = "Connect to the KataGo analysis service on your local network that you configured.";

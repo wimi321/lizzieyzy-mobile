@@ -2,7 +2,6 @@ import 'dart:math' as math;
 
 import 'package:lizzieyzy_mobile/domain/domain.dart';
 
-import 'calibration_manifest.dart';
 import 'review_input_validator.dart';
 
 enum PerformanceEstimationErrorCode {
@@ -12,6 +11,7 @@ enum PerformanceEstimationErrorCode {
   insufficientAnalysisQuality,
   analysisModelMismatch,
   uncalibratedAnalysisModel,
+  uncalibratedHumanModel,
   missingHumanStyleModel,
   insufficientDecisions,
 }
@@ -86,6 +86,24 @@ final class CalibratedGamePerformanceEstimator
         'This calibration requires a human-style policy model.',
       );
     }
+    final humanProfile = calibration.humanStyleProfile;
+    if (humanProfile != null &&
+        !manifest.humanStyleRanks.contains(humanProfile)) {
+      throw const PerformanceEstimationException(
+        PerformanceEstimationErrorCode.missingHumanStyleModel,
+        'The analysis manifest does not provide the calibrated HumanSL profile.',
+      );
+    }
+    if (calibration.requiresHumanStyleRanks) {
+      final humanModelHash = manifest.humanModelSha256?.toLowerCase();
+      if (humanModelHash == null ||
+          !calibration.allowedHumanModelSha256.contains(humanModelHash)) {
+        throw const PerformanceEstimationException(
+          PerformanceEstimationErrorCode.uncalibratedHumanModel,
+          'The HumanSL model hash is not included in this calibration.',
+        );
+      }
+    }
 
     if (analysis.moves.any(
       (node) => node.visits < calibration.minimumVisitsPerPosition,
@@ -155,15 +173,16 @@ final class CalibratedGamePerformanceEstimator
   ) {
     var total = 0.0;
     for (final decision in decisions) {
-      final index = decision.before.candidates.indexWhere(
-        (candidate) => candidate.move == decision.playedMove,
-      );
-      final policy = index < 0
-          ? calibration.policyFloor
-          : math.max(
-              calibration.policyFloor,
-              decision.before.candidates[index].policy,
-            );
+      final rawPolicy = calibration.requiresHumanStyleRanks
+          ? decision.after.playedMoveHumanPolicy
+          : decision.after.playedMovePolicy;
+      if (rawPolicy == null) {
+        throw const PerformanceEstimationException(
+          PerformanceEstimationErrorCode.missingHumanStyleModel,
+          'Calibrated played-move policy evidence is missing.',
+        );
+      }
+      final policy = math.max(calibration.policyFloor, rawPolicy);
       total += math.log(policy);
     }
     return total / decisions.length;
@@ -208,6 +227,8 @@ final class CalibratedGamePerformanceEstimator
   static bool _sameModel(ModelManifest left, ModelManifest right) {
     return left.id == right.id &&
         left.sha256.toLowerCase() == right.sha256.toLowerCase() &&
+        left.humanModelSha256?.toLowerCase() ==
+            right.humanModelSha256?.toLowerCase() &&
         left.engineVersion == right.engineVersion &&
         left.modelVersion == right.modelVersion &&
         _sameRanks(left.humanStyleRanks, right.humanStyleRanks);

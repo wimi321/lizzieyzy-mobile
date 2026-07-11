@@ -1,8 +1,8 @@
-import 'dart:convert';
-
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
+import 'package:lizzieyzy_mobile/application/kifu_repository.dart';
 import 'package:lizzieyzy_mobile/domain/domain.dart';
+import 'package:lizzieyzy_mobile/infrastructure/io/io.dart';
 import 'package:lizzieyzy_mobile/infrastructure/kifu/kifu.dart';
 
 typedef KifuFilePicker = Future<XFile?> Function();
@@ -11,44 +11,71 @@ enum KifuImportStatus { idle, picking, imported, failed }
 
 enum KifuFileFormat { sgf, gib }
 
+enum KifuImportFailureCode {
+  resourceLimit,
+  invalidEncoding,
+  unsupportedFormat,
+  invalidRecord,
+  unknown,
+}
+
+final class _UnsupportedKifuFormatException implements Exception {
+  const _UnsupportedKifuFormatException();
+}
+
 final class ImportedKifu {
   const ImportedKifu({
     required this.fileName,
     required this.format,
     required this.document,
     required this.warnings,
+    required this.textEncoding,
   });
 
   final String fileName;
   final KifuFileFormat format;
   final KifuDocument document;
   final List<String> warnings;
+  final KifuTextEncoding textEncoding;
 }
 
 final class KifuImportController extends ChangeNotifier {
   KifuImportController({
     KifuFilePicker? picker,
-    this.sgfCodec = const SgfCodec(),
-    this.gibCodec = const GibCodec(),
-  }) : _picker = picker ?? _openKifuFile;
+    this.limits = const KifuResourceLimits(),
+    SgfCodec? sgfCodec,
+    GibCodec? gibCodec,
+    KifuTextDecoder? textDecoder,
+  }) : _picker = picker ?? _openKifuFile,
+       sgfCodec =
+           sgfCodec ?? SgfCodec(syntaxParser: SgfSyntaxParser(limits: limits)),
+       gibCodec = gibCodec ?? GibCodec(limits: limits),
+       textDecoder =
+           textDecoder ??
+           KifuTextDecoder(
+             limits: limits,
+             gibCodec: gibCodec ?? GibCodec(limits: limits),
+           );
 
   final KifuFilePicker _picker;
+  final KifuResourceLimits limits;
   final SgfCodec sgfCodec;
   final GibCodec gibCodec;
+  final KifuTextDecoder textDecoder;
 
   KifuImportStatus _status = KifuImportStatus.idle;
   ImportedKifu? _result;
-  String? _errorMessage;
+  KifuImportFailureCode? _failureCode;
 
   KifuImportStatus get status => _status;
   ImportedKifu? get result => _result;
-  String? get errorMessage => _errorMessage;
+  KifuImportFailureCode? get failureCode => _failureCode;
 
   Future<void> pickAndImport() async {
     if (_status == KifuImportStatus.picking) return;
     _status = KifuImportStatus.picking;
     _result = null;
-    _errorMessage = null;
+    _failureCode = null;
     notifyListeners();
     try {
       final file = await _picker();
@@ -58,9 +85,16 @@ final class KifuImportController extends ChangeNotifier {
         return;
       }
       final format = _formatFor(file.name);
-      final bytes = await file.readAsBytes();
-      final content = utf8.decode(bytes, allowMalformed: true);
-      final documentId = 'import-${_stableId(file.name, bytes)}';
+      final bytes = await readBoundedXFile(
+        file,
+        maximumBytes: limits.maxInputBytes,
+      );
+      final decodedText = switch (format) {
+        KifuFileFormat.sgf => textDecoder.decodeSgf(bytes),
+        KifuFileFormat.gib => textDecoder.decodeGib(bytes),
+      };
+      final content = decodedText.text;
+      final documentId = 'import-${KifuContentIdentity.sha256Bytes(bytes)}';
       switch (format) {
         case KifuFileFormat.sgf:
           final decoded = sgfCodec.decode(
@@ -78,6 +112,7 @@ final class KifuImportController extends ChangeNotifier {
             warnings: <String>[
               for (final warning in decoded.warnings) warning.message,
             ],
+            textEncoding: decodedText.encoding,
           );
         case KifuFileFormat.gib:
           final decoded = gibCodec.decode(
@@ -95,14 +130,21 @@ final class KifuImportController extends ChangeNotifier {
             warnings: <String>[
               for (final warning in decoded.warnings) warning.message,
             ],
+            textEncoding: decodedText.encoding,
           );
       }
       _status = KifuImportStatus.imported;
     } on Object catch (error) {
       _status = KifuImportStatus.failed;
-      _errorMessage = switch (error) {
-        FormatException(:final message) => message,
-        _ => '无法读取该棋谱，请确认文件未损坏。',
+      _failureCode = switch (error) {
+        BoundedReadLimitException() ||
+        KifuResourceLimitException() => KifuImportFailureCode.resourceLimit,
+        AmbiguousKifuTextEncodingException() ||
+        KifuTextDecodingException() => KifuImportFailureCode.invalidEncoding,
+        _UnsupportedKifuFormatException() =>
+          KifuImportFailureCode.unsupportedFormat,
+        FormatException() => KifuImportFailureCode.invalidRecord,
+        _ => KifuImportFailureCode.unknown,
       };
     }
     notifyListeners();
@@ -113,27 +155,14 @@ final class KifuImportController extends ChangeNotifier {
     return switch (extension) {
       'sgf' => KifuFileFormat.sgf,
       'gib' => KifuFileFormat.gib,
-      _ => throw const FormatException('仅支持 .sgf 与 .gib 棋谱。'),
+      _ => throw const _UnsupportedKifuFormatException(),
     };
-  }
-
-  static String _stableId(String name, List<int> bytes) {
-    var hash = 0x811c9dc5;
-    for (final byte in utf8.encode(name)) {
-      hash ^= byte;
-      hash = (hash * 0x01000193) & 0xffffffff;
-    }
-    for (final byte in bytes) {
-      hash ^= byte;
-      hash = (hash * 0x01000193) & 0xffffffff;
-    }
-    return hash.toRadixString(16).padLeft(8, '0');
   }
 }
 
 Future<XFile?> _openKifuFile() {
   const type = XTypeGroup(
-    label: '围棋棋谱',
+    label: 'SGF / GIB',
     extensions: <String>['sgf', 'gib'],
     uniformTypeIdentifiers: <String>['public.text'],
   );

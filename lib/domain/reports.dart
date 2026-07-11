@@ -1,14 +1,48 @@
 import 'analysis.dart';
+import 'go_values.dart';
 import 'rank_values.dart';
 
 enum GamePhase { opening, middleGame, endgame }
 
 final class KeyMoment {
-  const KeyMoment({required this.analysis, required this.severityRank})
-    : assert(severityRank >= 1);
+  KeyMoment({
+    required this.playedMove,
+    required this.before,
+    required this.after,
+    required this.candidateRank,
+    required this.severityRank,
+  }) {
+    if (severityRank < 1) {
+      throw ArgumentError.value(severityRank, 'severityRank');
+    }
+    if (candidateRank != null && candidateRank! < 1) {
+      throw ArgumentError.value(candidateRank, 'candidateRank');
+    }
+    if (after.moveNumber != before.moveNumber + 1 ||
+        after.playedMove != playedMove ||
+        before.toPlay != playedMove.color) {
+      throw ArgumentError(
+        'A key moment must pair one played move with its adjacent analyses.',
+      );
+    }
+  }
 
-  final MoveAnalysis analysis;
+  /// The actual decision under review.
+  final Move playedMove;
+
+  /// Analysis of the position in which [playedMove] was chosen. Candidate
+  /// comparisons and PVs must come from this node.
+  final MoveAnalysis before;
+
+  /// Analysis after [playedMove]. Verified loss values live on this node.
+  final MoveAnalysis after;
+
+  /// One-based rank in [before]'s bounded candidates, or null when the played
+  /// move was outside that display list.
+  final int? candidateRank;
   final int severityRank;
+
+  int get moveNumber => after.moveNumber;
 }
 
 final class PhaseMetrics {

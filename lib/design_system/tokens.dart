@@ -33,6 +33,27 @@ abstract final class GoPrimitiveColors {
   static const whiteStone = Color(0xFFF8F7F2);
 }
 
+/// Camera/scan surfaces are intentionally theme-independent so the live
+/// preview keeps stable contrast in both app themes. Feature code consumes
+/// this component palette instead of embedding color literals.
+abstract final class GoCameraColors {
+  static const background = Color(0xFF0B100D);
+  static const previewFallback = Color(0xFF090C0A);
+  static const foreground = Color(0xFFFFFFFF);
+  static const foregroundDisabled = Color(0x61FFFFFF);
+  static const foregroundMuted = Color(0xB3FFFFFF);
+  static const guide = GoPrimitiveColors.jadeNight;
+  static const guideGlow = Color(0x6673CBAE);
+  static const recognizing = GoPrimitiveColors.board;
+  static const warning = Color(0xFFE2B35F);
+  static const preparing = Color(0xFFB6C1BA);
+  static const statusSurface = Color(0xE619221D);
+  static const stateScrim = Color(0xB30B100D);
+  static const previewWoodDark = Color(0xFF725B3E);
+  static const previewWoodLight = Color(0xFFB18E5A);
+  static const previewGrid = Color(0xC83F3022);
+}
+
 /// Four-point spacing scale. Names encode the multiplier to make layout
 /// reviews mechanical and discourage one-off values.
 abstract final class GoSpacing {

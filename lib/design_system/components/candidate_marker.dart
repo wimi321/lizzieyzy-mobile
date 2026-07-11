@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:lizzieyzy_mobile/l10n/l10n.dart';
 
 import '../tokens.dart';
 
@@ -94,7 +95,11 @@ class CandidateMarker extends StatelessWidget {
       button: onTap != null,
       enabled: onTap != null,
       selected: selected,
-      label: semanticLabel ?? '候选 $label${detail == null ? '' : '，$detail'}',
+      label:
+          semanticLabel ??
+          (detail == null
+              ? context.l10n.candidateSemantics(label)
+              : context.l10n.candidateSemanticsWithDetail(label, detail!)),
       excludeSemantics: true,
       child: ConstrainedBox(
         constraints: BoxConstraints(

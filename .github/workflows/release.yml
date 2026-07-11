@@ -1,0 +1,466 @@
+name: Release readiness
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-readiness-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  FLUTTER_VERSION: 3.41.6
+  INTEGRITY_PREDICATE_TYPE: https://github.com/wimi321/lizzieyzy-mobile/attestations/release-integrity/v1
+
+jobs:
+  quality:
+    name: Analyze, test, privacy, licenses, release contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+      - name: Require pushed tag to match the complete pubspec version
+        if: github.event_name == 'push'
+        run: >-
+          python3 .github/scripts/verify_release_tag.py
+          --event-name "${GITHUB_EVENT_NAME}"
+          --tag "${GITHUB_REF_NAME}"
+      - name: Install locked desktop KataGo bridge dependencies
+        run: |
+          python3.12 -m venv build/bridge-venv
+          build/bridge-venv/bin/python -m pip install \
+            --disable-pip-version-check \
+            --require-hashes \
+            -r tool/katago_bridge/requirements.lock
+      - name: Verify desktop KataGo bridge
+        run: |
+          build/bridge-venv/bin/python -m py_compile \
+            tool/katago_bridge/*.py tool/katago_bridge/tests/*.py
+          PYTHONPATH=tool build/bridge-venv/bin/python -m unittest discover \
+            -s tool/katago_bridge/tests -v
+      - name: Verify release evidence tooling
+        run: python3 -m unittest discover -s tool/tests -v
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Resolve locked dependencies
+        run: flutter pub get
+      - name: Require reproducible Pub lockfile
+        run: git diff --exit-code -- pubspec.lock
+      - name: Verify formatting
+        run: dart format --output=none --set-exit-if-changed lib test
+      - name: Analyze
+        run: flutter analyze --fatal-infos
+      - name: Verify repository and release contracts
+        run: |
+          python3 .github/scripts/verify_visual_benchmarks.py
+          python3 .github/scripts/verify_brand_assets.py
+          python3 .github/scripts/verify_privacy_declarations.py
+          python3 .github/scripts/verify_action_pins.py
+          python3 .github/scripts/verify_gradle_integrity.py
+          python3 .github/scripts/verify_release_workflows.py
+          python3 .github/scripts/verify_native_inbound_contract.py
+      - name: Prevent production fixture imports
+        run: python3 .github/scripts/verify_no_ui_fixture_imports.py
+      - name: Enforce semantic design tokens in product UI
+        run: python3 .github/scripts/verify_design_token_usage.py
+      - name: Verify resolved licenses and native ML Kit boundary
+        run: python3 tool/verify_licenses.py
+      - name: Run non-golden tests
+        shell: bash
+        run: flutter test $(find test -type f -name '*_test.dart' ! -name 'golden_test.dart' -print | sort)
+
+  android-release:
+    name: Exact unsigned Android candidate, symbols, and provenance
+    needs: quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Resolve locked dependencies
+        run: flutter pub get
+      - name: Require reproducible Pub lockfile
+        run: git diff --exit-code -- pubspec.lock
+      - name: Build auditable release APK and retained Flutter symbols
+        run: >-
+          flutter build apk --release
+          --split-debug-info=build/symbols/android
+      - name: Verify final APK legal assets
+        run: >-
+          python3 .github/scripts/verify_packaged_legal_assets.py
+          --apk build/app/outputs/flutter-apk/app-release.apk
+      - name: Verify final APK permissions
+        run: >-
+          .github/scripts/verify_android_permissions.sh
+          build/app/outputs/flutter-apk/app-release.apk
+      - name: Resolve release runtime graph with the reviewed wrapper
+        run: |
+          mkdir -p build/sbom
+          ./android/gradlew -p android :app:dependencies \
+            --configuration releaseRuntimeClasspath \
+            --dependency-verification=strict \
+            --console=plain \
+            | sed -E '/^\[Incubating\] Problems report/d;/^BUILD SUCCESSFUL in /d' \
+            > build/sbom/android-release-runtime.txt
+      - name: Verify Maven licenses, notices, and artifact hashes
+        run: >-
+          python3 tool/native_licenses.py maven
+          --android-report build/sbom/android-release-runtime.txt
+          --manifest-output build/sbom/maven-artifacts.json
+          --check
+      - name: Validate and archive release crash symbols
+        run: >-
+          python3 tool/release_symbols.py android
+          --mapping build/app/outputs/mapping/release/mapping.txt
+          --native-symbols build/app/outputs/native-debug-symbols/release/native-debug-symbols.zip
+          --flutter-symbols build/symbols/android
+          --output build/release-evidence/android-release-symbols.zip
+          --manifest build/release-evidence/android-release-symbols.json
+      - name: Stage and hash the exact Android candidate
+        run: |
+          mkdir -p build/release-evidence/gradle-wrapper
+          cp build/app/outputs/flutter-apk/app-release.apk \
+            build/release-evidence/LizzieYZY-Mobile-android-unsigned.apk
+          cp build/sbom/android-release-runtime.txt build/release-evidence/
+          cp build/sbom/maven-artifacts.json build/release-evidence/
+          cp assets/legal/maven_third_party_licenses.txt build/release-evidence/
+          cp android/gradle/verification-metadata.xml \
+            build/release-evidence/gradle-verification-metadata.xml
+          cp android/gradlew android/gradlew.bat \
+            android/gradle/wrapper/gradle-wrapper.jar \
+            android/gradle/wrapper/gradle-wrapper.properties \
+            android/gradle/wrapper/gradle-wrapper-integrity.json \
+            build/release-evidence/gradle-wrapper/
+          python3 tool/release_evidence.py hash \
+            --output build/release-evidence/android-candidate-digest.json \
+            --artifact android-apk=build/release-evidence/LizzieYZY-Mobile-android-unsigned.apk
+      - name: Sign GitHub build provenance for the exact Android candidate
+        id: attest_android
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
+        with:
+          subject-path: build/release-evidence/LizzieYZY-Mobile-android-unsigned.apk
+      - name: Preserve Android signed build-provenance bundle
+        run: >-
+          cp "${{ steps.attest_android.outputs.bundle-path }}"
+          build/release-evidence/android-build-provenance.sigstore.json
+      - name: Upload the exact Android candidate and evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: android-release-candidate-${{ github.sha }}
+          path: build/release-evidence
+          if-no-files-found: error
+          retention-days: 30
+
+  ios-release:
+    name: Exact unsigned iOS candidate, dSYMs, goldens, and provenance
+    needs: quality
+    runs-on: macos-15
+    timeout-minutes: 50
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Resolve locked dependencies
+        run: flutter pub get
+      - name: Require reproducible Pub lockfile
+        run: git diff --exit-code -- pubspec.lock
+      - name: Rerun approved macOS visual goldens
+        run: flutter test test/golden_test.dart
+      - name: Build auditable unsigned iOS release and retained Flutter symbols
+        run: >-
+          flutter build ios --release --no-codesign
+          --split-debug-info=build/symbols/ios
+      - name: Verify packaged native legal assets
+        run: >-
+          python3 .github/scripts/verify_packaged_legal_assets.py
+          --ios-app build/ios/iphoneos/Runner.app
+      - name: Verify packaged privacy aggregate
+        run: >-
+          python3 .github/scripts/verify_privacy_declarations.py
+          --app build/ios/iphoneos/Runner.app
+      - name: Verify CocoaPods licenses and notices
+        run: python3 tool/native_licenses.py cocoapods --check
+      - name: Require reproducible CocoaPods lockfile
+        run: git diff --exit-code -- ios/Podfile.lock
+      - name: Validate every dSYM UUID and archive release crash symbols
+        run: >-
+          python3 tool/release_symbols.py ios
+          --app build/ios/iphoneos/Runner.app
+          --dsym-root build/ios/Release-iphoneos
+          --flutter-symbols build/symbols/ios
+          --output build/release-evidence/ios-release-symbols.zip
+          --manifest build/release-evidence/ios-release-symbols.json
+      - name: Stage and hash the exact iOS candidate
+        run: |
+          mkdir -p build/release-evidence
+          /usr/bin/ditto -c -k --sequesterRsrc --keepParent \
+            build/ios/iphoneos/Runner.app \
+            build/release-evidence/LizzieYZY-Mobile-ios-unsigned.zip
+          cp assets/legal/cocoapods_third_party_licenses.txt build/release-evidence/
+          cp ios/Podfile.lock build/release-evidence/Podfile.lock
+          python3 tool/release_evidence.py hash \
+            --output build/release-evidence/ios-candidate-digest.json \
+            --artifact ios-unsigned-app=build/release-evidence/LizzieYZY-Mobile-ios-unsigned.zip
+      - name: Sign GitHub build provenance for the exact iOS candidate
+        id: attest_ios
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
+        with:
+          subject-path: build/release-evidence/LizzieYZY-Mobile-ios-unsigned.zip
+      - name: Preserve iOS signed build-provenance bundle
+        run: >-
+          cp "${{ steps.attest_ios.outputs.bundle-path }}"
+          build/release-evidence/ios-build-provenance.sigstore.json
+      - name: Upload the exact iOS candidate and evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ios-release-candidate-${{ github.sha }}
+          path: build/release-evidence
+          if-no-files-found: error
+          retention-days: 30
+
+  supply-chain:
+    name: Deterministic release evidence bundle and custom integrity attestation
+    needs: [android-release, ios-release]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Resolve locked dependencies
+        run: flutter pub get
+      - name: Download the exact Android candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: android-release-candidate-${{ github.sha }}
+          path: build/evidence/android
+      - name: Download the exact iOS candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: ios-release-candidate-${{ github.sha }}
+          path: build/evidence/ios
+      - name: Verify downloaded candidates, symbols, locks, and notices
+        run: |
+          python3 tool/release_evidence.py hash \
+            --output build/evidence/android/recomputed.json \
+            --artifact android-apk=build/evidence/android/LizzieYZY-Mobile-android-unsigned.apk
+          cmp build/evidence/android/android-candidate-digest.json \
+            build/evidence/android/recomputed.json
+          python3 tool/release_evidence.py hash \
+            --output build/evidence/ios/recomputed.json \
+            --artifact ios-unsigned-app=build/evidence/ios/LizzieYZY-Mobile-ios-unsigned.zip
+          cmp build/evidence/ios/ios-candidate-digest.json \
+            build/evidence/ios/recomputed.json
+          python3 tool/release_symbols.py verify \
+            --archive build/evidence/android/android-release-symbols.zip \
+            --manifest build/evidence/android/android-release-symbols.json
+          python3 tool/release_symbols.py verify \
+            --archive build/evidence/ios/ios-release-symbols.zip \
+            --manifest build/evidence/ios/ios-release-symbols.json
+          cmp assets/legal/maven_third_party_licenses.txt \
+            build/evidence/android/maven_third_party_licenses.txt
+          cmp android/gradle/verification-metadata.xml \
+            build/evidence/android/gradle-verification-metadata.xml
+          cmp android/gradlew build/evidence/android/gradle-wrapper/gradlew
+          cmp android/gradlew.bat build/evidence/android/gradle-wrapper/gradlew.bat
+          cmp android/gradle/wrapper/gradle-wrapper.jar \
+            build/evidence/android/gradle-wrapper/gradle-wrapper.jar
+          cmp android/gradle/wrapper/gradle-wrapper.properties \
+            build/evidence/android/gradle-wrapper/gradle-wrapper.properties
+          cmp android/gradle/wrapper/gradle-wrapper-integrity.json \
+            build/evidence/android/gradle-wrapper/gradle-wrapper-integrity.json
+          cmp assets/legal/cocoapods_third_party_licenses.txt \
+            build/evidence/ios/cocoapods_third_party_licenses.txt
+          cmp ios/Podfile.lock build/evidence/ios/Podfile.lock
+      - name: Verify GitHub-signed build provenance for both exact candidates
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh attestation verify \
+            build/evidence/android/LizzieYZY-Mobile-android-unsigned.apk \
+            --repo "${GITHUB_REPOSITORY}"
+          gh attestation verify \
+            build/evidence/ios/LizzieYZY-Mobile-ios-unsigned.zip \
+            --repo "${GITHUB_REPOSITORY}"
+      - name: Hash both exact release candidates
+        run: >-
+          python3 tool/release_evidence.py hash
+          --output build/sbom/release-artifact-digests.json
+          --artifact android-apk=build/evidence/android/LizzieYZY-Mobile-android-unsigned.apk
+          --artifact ios-unsigned-app=build/evidence/ios/LizzieYZY-Mobile-ios-unsigned.zip
+      - name: Generate same-candidate CycloneDX SBOM
+        run: >-
+          python3 tool/sbom.py generate
+          --output build/sbom/lizzieyzy-mobile.cdx.json
+          --android-report build/evidence/android/android-release-runtime.txt
+          --maven-manifest build/evidence/android/maven-artifacts.json
+          --artifact-digests build/sbom/release-artifact-digests.json
+      - name: Validate same-candidate CycloneDX SBOM
+        run: >-
+          python3 tool/sbom.py validate
+          --input build/sbom/lizzieyzy-mobile.cdx.json
+          --require-ecosystem pub
+          --require-ecosystem cocoapods
+          --require-ecosystem python
+          --require-ecosystem maven
+          --require-ecosystem release-artifact
+      - name: Generate and verify complete Pub, native, and Python license texts
+        run: >-
+          python3 tool/verify_licenses.py
+          --output build/sbom/THIRD_PARTY_LICENSES.txt
+      - name: Generate a custom digest-only integrity predicate
+        run: >-
+          python3 tool/release_evidence.py predicate
+          --output build/sbom/release-integrity-predicate.json
+          --artifacts build/sbom/release-artifact-digests.json
+          --evidence sbom=build/sbom/lizzieyzy-mobile.cdx.json
+          --evidence licenses=build/sbom/THIRD_PARTY_LICENSES.txt
+          --evidence android-runtime=build/evidence/android/android-release-runtime.txt
+          --evidence maven-artifacts=build/evidence/android/maven-artifacts.json
+          --evidence gradle-verification=android/gradle/verification-metadata.xml
+          --evidence gradle-wrapper-lock=android/gradle/wrapper/gradle-wrapper-integrity.json
+          --evidence gradle-wrapper-jar=android/gradle/wrapper/gradle-wrapper.jar
+          --evidence gradle-wrapper-properties=android/gradle/wrapper/gradle-wrapper.properties
+          --evidence gradlew=android/gradlew
+          --evidence gradlew-bat=android/gradlew.bat
+          --evidence pod-lock=ios/Podfile.lock
+          --evidence bridge-lock=tool/katago_bridge/requirements.lock
+          --evidence bridge-license=tool/katago_bridge/LICENSES/websockets-BSD-3-Clause.txt
+          --evidence android-symbols=build/evidence/android/android-release-symbols.zip
+          --evidence android-symbol-manifest=build/evidence/android/android-release-symbols.json
+          --evidence ios-symbols=build/evidence/ios/ios-release-symbols.zip
+          --evidence ios-symbol-manifest=build/evidence/ios/ios-release-symbols.json
+          --evidence android-build-provenance=build/evidence/android/android-build-provenance.sigstore.json
+          --evidence ios-build-provenance=build/evidence/ios/ios-build-provenance.sigstore.json
+      - name: Stage the canonical release evidence tree
+        run: |
+          mkdir -p \
+            build/final-evidence/contents/candidates/android \
+            build/final-evidence/contents/candidates/ios \
+            build/final-evidence/contents/compliance \
+            build/final-evidence/contents/locks/gradle \
+            build/final-evidence/contents/locks/cocoapods \
+            build/final-evidence/contents/locks/python
+          cp \
+            build/evidence/android/LizzieYZY-Mobile-android-unsigned.apk \
+            build/evidence/android/android-candidate-digest.json \
+            build/evidence/android/android-release-symbols.zip \
+            build/evidence/android/android-release-symbols.json \
+            build/evidence/android/android-build-provenance.sigstore.json \
+            build/evidence/android/android-release-runtime.txt \
+            build/evidence/android/maven-artifacts.json \
+            build/evidence/android/maven_third_party_licenses.txt \
+            build/final-evidence/contents/candidates/android/
+          cp \
+            build/evidence/ios/LizzieYZY-Mobile-ios-unsigned.zip \
+            build/evidence/ios/ios-candidate-digest.json \
+            build/evidence/ios/ios-release-symbols.zip \
+            build/evidence/ios/ios-release-symbols.json \
+            build/evidence/ios/ios-build-provenance.sigstore.json \
+            build/evidence/ios/cocoapods_third_party_licenses.txt \
+            build/final-evidence/contents/candidates/ios/
+          cp \
+            build/sbom/release-artifact-digests.json \
+            build/sbom/lizzieyzy-mobile.cdx.json \
+            build/sbom/THIRD_PARTY_LICENSES.txt \
+            build/sbom/release-integrity-predicate.json \
+            build/final-evidence/contents/compliance/
+          cp \
+            android/gradlew android/gradlew.bat \
+            android/gradle/verification-metadata.xml \
+            android/gradle/wrapper/gradle-wrapper.jar \
+            android/gradle/wrapper/gradle-wrapper.properties \
+            android/gradle/wrapper/gradle-wrapper-integrity.json \
+            build/final-evidence/contents/locks/gradle/
+          cp ios/Podfile.lock build/final-evidence/contents/locks/cocoapods/
+          cp \
+            tool/katago_bridge/requirements.lock \
+            tool/katago_bridge/LICENSES/websockets-BSD-3-Clause.txt \
+            build/final-evidence/contents/locks/python/
+      - name: Create stable checksums and deterministic evidence bundle
+        run: |
+          python3 tool/release_evidence.py checksums \
+            --output build/final-evidence/checksums.sha256 \
+            --input release=build/final-evidence/contents
+          python3 tool/release_evidence.py bundle \
+            --output build/final-evidence/LizzieYZY-Mobile-release-evidence.zip \
+            --input release=build/final-evidence/contents \
+            --input checksums=build/final-evidence/checksums.sha256
+      - name: Sign the final bundle with the custom integrity predicate
+        id: attest_integrity
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
+        with:
+          subject-path: build/final-evidence/LizzieYZY-Mobile-release-evidence.zip
+          predicate-type: ${{ env.INTEGRITY_PREDICATE_TYPE }}
+          predicate-path: build/sbom/release-integrity-predicate.json
+      - name: Preserve and verify the signed custom integrity attestation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp "${{ steps.attest_integrity.outputs.bundle-path }}" \
+            build/final-evidence/release-integrity.sigstore.json
+          gh attestation verify \
+            build/final-evidence/LizzieYZY-Mobile-release-evidence.zip \
+            --repo "${GITHUB_REPOSITORY}" \
+            --predicate-type "${INTEGRITY_PREDICATE_TYPE}"
+      - name: Upload deterministic candidates and signed compliance evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-candidates-and-compliance-${{ github.sha }}
+          path: |
+            build/final-evidence/LizzieYZY-Mobile-release-evidence.zip
+            build/final-evidence/release-integrity.sigstore.json
+            build/final-evidence/checksums.sha256
+            build/sbom/release-integrity-predicate.json
+            build/sbom/lizzieyzy-mobile.cdx.json
+            build/sbom/THIRD_PARTY_LICENSES.txt
+            build/evidence/android/LizzieYZY-Mobile-android-unsigned.apk
+            build/evidence/ios/LizzieYZY-Mobile-ios-unsigned.zip
+          if-no-files-found: error
+          retention-days: 90

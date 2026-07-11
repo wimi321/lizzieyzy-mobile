@@ -1,5 +1,4 @@
 import 'package:lizzieyzy_mobile/domain/domain.dart';
-import 'package:lizzieyzy_mobile/infrastructure/review/review.dart';
 
 final class ReviewFixture {
   const ReviewFixture({
@@ -24,14 +23,22 @@ ReviewFixture reviewFixture({
   Set<int> passMoveNumbers = const <int>{},
   int Function(int moveNumber)? candidateRankForMove,
   double Function(int moveNumber)? pointLossForMove,
+  double Function(int moveNumber)? playedMovePolicyForMove,
+  GameMetadata metadata = const GameMetadata(),
+  int? principalVariationMoveNumber,
   ModelManifest? model,
 }) {
   final start = initialPosition ?? BoardPosition.empty(boardSize);
-  final availablePoints = <BoardPoint>[
+  final orderedPoints = <BoardPoint>[
     for (var row = 0; row < boardSize.dimension; row += 2)
       for (var column = 0; column < boardSize.dimension; column += 2)
         BoardPoint(column, row),
   ].where((point) => start.stoneAt(point) == null).toList();
+  final stride = _coprimeStride(orderedPoints.length);
+  final availablePoints = <BoardPoint>[
+    for (var index = 0; index < orderedPoints.length; index++)
+      orderedPoints[(index * stride) % orderedPoints.length],
+  ];
   if (passMoveNumbers.any(
     (moveNumber) => moveNumber < 1 || moveNumber > moveCount,
   )) {
@@ -58,6 +65,7 @@ ReviewFixture reviewFixture({
     moves: moves,
     rules: const GoRules.chinese(),
     source: const KifuSource(kind: KifuSourceKind.fixture),
+    metadata: metadata,
     firstPlayer: firstPlayer,
   );
   final resolvedModel = model ?? analysisModelFixture();
@@ -69,6 +77,12 @@ ReviewFixture reviewFixture({
   );
   final rankFor = candidateRankForMove ?? (moveNumber) => (moveNumber % 6) + 1;
   final lossFor = pointLossForMove ?? (moveNumber) => (moveNumber % 7) * 0.5;
+  final policyFor =
+      playedMovePolicyForMove ??
+      (moveNumber) {
+        final rank = rankFor(moveNumber);
+        return rank >= 1 && rank <= 5 ? 0.24 / rank : 0.005;
+      };
   final analyses = <MoveAnalysis>[];
   for (var position = 0; position <= moveCount; position++) {
     final toPlay = position.isEven ? firstPlayer : firstPlayer.opponent;
@@ -79,6 +93,10 @@ ReviewFixture reviewFixture({
             rank: rankFor(position + 1),
             boardSize: boardSize,
             visits: visitsPerMove,
+            position: record.validation.positions[position],
+            rules: record.rules,
+            includePrincipalVariation:
+                principalVariationMoveNumber == position + 1,
           );
     analyses.add(
       MoveAnalysis(
@@ -93,6 +111,8 @@ ReviewFixture reviewFixture({
         playedMoveWinRateLoss: position == 0
             ? null
             : (lossFor(position) / 100).clamp(0, 1),
+        playedMovePolicy: position == 0 ? null : policyFor(position),
+        playedMoveHumanPolicy: position == 0 ? null : policyFor(position),
       ),
     );
   }
@@ -112,9 +132,30 @@ ReviewFixture reviewFixture({
   );
 }
 
+int _coprimeStride(int length) {
+  if (length <= 1) return 1;
+  var candidate = length ~/ 3;
+  while (_greatestCommonDivisor(candidate, length) != 1) {
+    candidate++;
+  }
+  return candidate;
+}
+
+int _greatestCommonDivisor(int left, int right) {
+  var a = left.abs();
+  var b = right.abs();
+  while (b != 0) {
+    final remainder = a % b;
+    a = b;
+    b = remainder;
+  }
+  return a;
+}
+
 ModelManifest analysisModelFixture({
   String id = 'human-sl-b10',
   String hashCharacter = 'a',
+  String humanHashCharacter = 'd',
   bool includeHumanRanks = true,
 }) {
   return ModelManifest(
@@ -124,6 +165,9 @@ ModelManifest analysisModelFixture({
     engineVersion: '1.16.5',
     modelVersion: 'b10-human-sl-test',
     license: 'CC-BY-4.0',
+    humanModelSha256: includeHumanRanks
+        ? List.filled(64, humanHashCharacter).join()
+        : null,
     humanStyleRanks: includeHumanRanks
         ? <GoRank>[GoRank.kyu(20), GoRank.kyu(1), GoRank.dan(9)]
         : const <GoRank>[],
@@ -132,6 +176,7 @@ ModelManifest analysisModelFixture({
 
 GamePerformanceCalibration calibrationFixture({
   String allowedHashCharacter = 'a',
+  String allowedHumanHashCharacter = 'd',
   int minimumDecisions = 40,
   int mediumConfidenceDecisions = 80,
   int minimumVisits = 1000,
@@ -188,6 +233,9 @@ GamePerformanceCalibration calibrationFixture({
     allowedAnalysisModelSha256: <String>{
       List.filled(64, allowedHashCharacter).join(),
     },
+    allowedHumanModelSha256: requiresHumanStyleRanks
+        ? <String>{List.filled(64, allowedHumanHashCharacter).join()}
+        : const <String>{},
     allowedProfiles: const <AnalysisProfile>{
       AnalysisProfile.standard,
       AnalysisProfile.deep,
@@ -197,6 +245,7 @@ GamePerformanceCalibration calibrationFixture({
     severeMistakePointLoss: 3,
     policyFloor: 1e-6,
     requiresHumanStyleRanks: requiresHumanStyleRanks,
+    humanStyleProfile: requiresHumanStyleRanks ? GoRank.kyu(1) : null,
   );
 }
 
@@ -228,6 +277,10 @@ MoveAnalysis copyMoveAnalysis(
   List<Candidate>? candidates,
   double? pointLoss,
   bool removePointLoss = false,
+  double? playedMovePolicy,
+  bool removePlayedMovePolicy = false,
+  double? playedMoveHumanPolicy,
+  bool removePlayedMoveHumanPolicy = false,
 }) {
   return MoveAnalysis(
     moveNumber: source.moveNumber,
@@ -241,6 +294,12 @@ MoveAnalysis copyMoveAnalysis(
         ? null
         : pointLoss ?? source.playedMovePointLoss,
     playedMoveWinRateLoss: source.playedMoveWinRateLoss,
+    playedMovePolicy: removePlayedMovePolicy
+        ? null
+        : playedMovePolicy ?? source.playedMovePolicy,
+    playedMoveHumanPolicy: removePlayedMoveHumanPolicy
+        ? null
+        : playedMoveHumanPolicy ?? source.playedMoveHumanPolicy,
     ownership: source.ownership,
   );
 }
@@ -268,12 +327,35 @@ List<Candidate> _candidatesFor({
   required int rank,
   required BoardSize boardSize,
   required int visits,
+  required BoardPosition position,
+  required GoRules rules,
+  required bool includePrincipalVariation,
 }) {
-  final alternatives = <Move>[
-    for (var row = boardSize.dimension - 1; row >= 0; row--)
-      for (var column = boardSize.dimension - 1; column >= 0; column--)
-        Move.play(color: actualMove.color, point: BoardPoint(column, row)),
-  ].where((move) => move != actualMove).take(5).toList();
+  final alternatives =
+      <Move>[
+            for (var row = boardSize.dimension - 1; row >= 0; row--)
+              for (var column = boardSize.dimension - 1; column >= 0; column--)
+                Move.play(
+                  color: actualMove.color,
+                  point: BoardPoint(column, row),
+                ),
+          ]
+          .where((move) {
+            if (move == actualMove || position.stoneAt(move.point!) != null) {
+              return false;
+            }
+            return GoRuleValidator.validate(
+              initialPosition: position,
+              moves: <Move>[move],
+              rules: rules,
+              firstPlayer: actualMove.color,
+            ).isValid;
+          })
+          .take(5)
+          .toList();
+  if (alternatives.length < 5) {
+    alternatives.add(Move.pass(color: actualMove.color));
+  }
   final moves = List<Move>.of(alternatives);
   if (rank >= 1 && rank <= 5) {
     moves
@@ -288,6 +370,48 @@ List<Candidate> _candidatesFor({
         scoreLead: 3 - index * 0.5,
         visits: visits - index * 50,
         policy: moves[index] == actualMove ? 0.24 / (index + 1) : 0.04,
+        principalVariation: includePrincipalVariation
+            ? _principalVariation(
+                position: position,
+                firstMove: moves[index],
+                rules: rules,
+                boardSize: boardSize,
+              )
+            : const <Move>[],
       ),
   ];
+}
+
+List<Move> _principalVariation({
+  required BoardPosition position,
+  required Move firstMove,
+  required GoRules rules,
+  required BoardSize boardSize,
+}) {
+  final variation = <Move>[firstMove];
+  while (variation.length < 5) {
+    final color = variation.last.color.opponent;
+    Move? next;
+    for (var row = 0; row < boardSize.dimension && next == null; row++) {
+      for (var column = 0; column < boardSize.dimension; column++) {
+        final candidate = Move.play(
+          color: color,
+          point: BoardPoint(column, row),
+        );
+        final trial = <Move>[...variation, candidate];
+        if (GoRuleValidator.validate(
+          initialPosition: position,
+          moves: trial,
+          rules: rules,
+          firstPlayer: firstMove.color,
+        ).isValid) {
+          next = candidate;
+          break;
+        }
+      }
+    }
+    next ??= Move.pass(color: color);
+    variation.add(next);
+  }
+  return variation;
 }

@@ -1,16 +1,25 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:lizzieyzy_mobile/application/analysis/analysis.dart';
+import 'package:lizzieyzy_mobile/application/kifu_export_scope.dart';
+import 'package:lizzieyzy_mobile/application/kifu_export_service.dart';
+import 'package:lizzieyzy_mobile/application/kifu_workspace.dart';
 import 'package:lizzieyzy_mobile/design_system/design_system.dart';
+import 'package:lizzieyzy_mobile/domain/domain.dart' as domain;
+import 'package:lizzieyzy_mobile/l10n/l10n.dart';
 
 import '../../../app/app_routes.dart';
 import '../../common/presentation/feature_chrome.dart';
-import '../../fixtures/ui_fixtures.dart';
+import '../../common/presentation/share_anchor.dart';
+import 'review_screen_data.dart';
 import 'review_widgets.dart';
 import 'tablet_review_screen.dart';
 
 class KeyMoveReviewScreen extends StatefulWidget {
-  const KeyMoveReviewScreen({super.key});
+  const KeyMoveReviewScreen({super.key, this.data});
+
+  final ReviewScreenData? data;
 
   @override
   State<KeyMoveReviewScreen> createState() => _KeyMoveReviewScreenState();
@@ -18,49 +27,57 @@ class KeyMoveReviewScreen extends StatefulWidget {
 
 class _KeyMoveReviewScreenState extends State<KeyMoveReviewScreen> {
   ReviewSection _section = ReviewSection.keyMoves;
-  var _currentMove = UiFixtures.keyMove.moveNumber;
+  int? _currentMove;
+  bool _sharing = false;
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final data = widget.data ?? _dataFromActiveSession(context);
+    if (data == null) return const _ReviewDataRequired();
+    final initialMove = data.primaryMoment?.moveNumber ?? 1;
+    final currentMove = (_currentMove ?? initialMove).clamp(1, data.totalMoves);
     if (MediaQuery.sizeOf(context).width >= 840) {
-      return const TabletReviewScreen();
+      return TabletReviewScreen(data: data, initialMove: currentMove);
     }
-    final theme = Theme.of(context);
+    final before = data.beforeMove(currentMove);
+    final candidates = data.candidatesBeforeMove(currentMove, l10n);
+    final bestPoint = before.candidates.firstOrNull?.move.point;
+    final largeText = MediaQuery.textScalerOf(context).scale(1) >= 1.6;
     return Scaffold(
       body: Column(
         children: <Widget>[
           FeatureTopBar(
-            title: '山海一局  vs  清风入弦',
-            subtitle: '中国规则 · 白胜3.5目 · 236手',
+            title: data.localizedTitle(l10n),
+            subtitle: data.localizedSubtitle(l10n),
             leading: const BackCircleButton(),
             actions: <Widget>[
-              IconButton(
-                tooltip: '导出复盘',
-                onPressed: () {},
-                icon: const Icon(Icons.ios_share_outlined),
+              Builder(
+                builder: (buttonContext) => IconButton(
+                  tooltip: l10n.shareKifu,
+                  onPressed: _sharing
+                      ? null
+                      : () => _share(buttonContext, data.record),
+                  icon: _sharing
+                      ? const SizedBox.square(
+                          dimension: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.ios_share_outlined),
+                ),
               ),
             ],
           ),
           Expanded(
             child: SafeArea(
               top: false,
-              key: const Key('mobile-review-scroll'),
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   const horizontalPadding = GoSpacing.s3;
-                  final contentWidth =
-                      constraints.maxWidth - horizontalPadding * 2;
-                  final textScale = MediaQuery.textScalerOf(context).scale(1);
-                  final largeText = textScale > 1.45;
-                  final reservedHeight = largeText
-                      ? 400.0
-                      : 330 + math.max<double>(0, textScale - 1) * 24;
+                  final reserved = largeText ? 354.0 : 318.0;
                   final boardSide = math.min<double>(
-                    contentWidth,
-                    math.max<double>(
-                      largeText ? 200 : 208,
-                      constraints.maxHeight - reservedHeight,
-                    ),
+                    constraints.maxWidth - horizontalPadding * 2,
+                    math.max<double>(132, constraints.maxHeight - reserved),
                   );
                   return Padding(
                     padding: const EdgeInsets.fromLTRB(
@@ -70,65 +87,62 @@ class _KeyMoveReviewScreenState extends State<KeyMoveReviewScreen> {
                       GoSpacing.s1,
                     ),
                     child: Column(
+                      key: const Key('mobile-review-viewport'),
                       children: <Widget>[
-                        if (!largeText)
-                          Row(
-                            children: <Widget>[
-                              const _PlayerScore(
-                                stoneColor: StoneColor.black,
-                                player: '山海一局',
-                                rank: '2级',
-                              ),
-                              Expanded(
-                                child: Text(
-                                  '第 $_currentMove 手',
-                                  textAlign: TextAlign.center,
-                                  style: theme.textTheme.labelLarge,
-                                ),
-                              ),
-                              const _PlayerScore(
-                                stoneColor: StoneColor.white,
-                                player: '清风入弦',
-                                rank: '1级',
-                                alignEnd: true,
-                              ),
-                            ],
-                          ),
-                        if (!largeText) const SizedBox(height: GoSpacing.s1),
                         SizedBox.square(
                           dimension: boardSide,
                           child: GoBoard(
-                            stones: UiFixtures.stones,
-                            candidates: UiFixtures.candidates,
-                            lastMove: const BoardPoint(15, 3),
-                            selectedPoint: const BoardPoint(16, 5),
-                            semanticLabel: '第$_currentMove手复盘棋盘，显示三个候选点',
+                            boardSize: data.record.boardSize.dimension,
+                            stones: data.stonesBeforeMove(currentMove),
+                            candidates: candidates,
+                            lastMove: _previousMovePoint(data, currentMove),
+                            selectedPoint: bestPoint == null
+                                ? null
+                                : uiPoint(bestPoint),
+                            semanticLabel: l10n.reviewBoardSemantics(
+                              currentMove,
+                              candidates.length,
+                            ),
                             showCoordinates: true,
                           ),
                         ),
                         const SizedBox(height: GoSpacing.s1),
-                        if (largeText)
-                          _LargeTextReviewMetricStrip(currentMove: _currentMove)
-                        else
-                          _ReviewMetricStrip(currentMove: _currentMove),
+                        _PositionMetricStrip(
+                          moveNumber: currentMove,
+                          scoreLead: before.scoreLead,
+                          blackWinRate: before.blackWinRate,
+                          compact: largeText,
+                        ),
                         MoveTimeline(
-                          currentMove: _currentMove,
-                          totalMoves: 236,
-                          keyMoves: UiFixtures.keyMove.timelineKeyMoves,
+                          currentMove: currentMove,
+                          minimumMove: 1,
+                          totalMoves: data.totalMoves,
+                          keyMoves: data.keyMoveNumbers,
                           onChanged: (move) =>
                               setState(() => _currentMove = move),
                         ),
                         const SizedBox(height: GoSpacing.s1),
-                        _PhoneReviewInspector(
-                          selectedSection: _section,
-                          onSectionChanged: (section) =>
-                              setState(() => _section = section),
-                          child: AnimatedSwitcher(
-                            duration: GoMotion.resolve(
+                        Expanded(
+                          child: ReviewInspector(
+                            data: data,
+                            currentMove: currentMove,
+                            section: _section,
+                            compact: largeText,
+                            onSectionChanged: (section) =>
+                                setState(() => _section = section),
+                            onOpenVariation: () => Navigator.pushNamed(
                               context,
-                              GoMotion.standard,
+                              AppRoutes.variationComparison,
+                              arguments: ReviewMoveSelection(
+                                data: data,
+                                moveNumber: currentMove,
+                              ),
                             ),
-                            child: _buildSection(context, largeText: largeText),
+                            onOpenPerformance: () => Navigator.pushNamed(
+                              context,
+                              AppRoutes.gamePerformance,
+                              arguments: data,
+                            ),
                           ),
                         ),
                       ],
@@ -143,421 +157,169 @@ class _KeyMoveReviewScreenState extends State<KeyMoveReviewScreen> {
     );
   }
 
-  Widget _buildSection(BuildContext context, {required bool largeText}) {
-    if (largeText) {
-      return switch (_section) {
-        ReviewSection.keyMoves => _LargeTextInspectorCard(
-          key: const ValueKey(ReviewSection.keyMoves),
-          text: '第87手 · Q16 → R14\n目损 -5.2目 · 胜率 -18.4pp',
-          semanticLabel: '第87手，实战Q16，最佳R14，目差损失5.2目，胜率下降18.4个百分点',
-          onTap: () =>
-              Navigator.pushNamed(context, AppRoutes.variationComparison),
-        ),
-        ReviewSection.variations => _LargeTextInspectorCard(
-          key: const ValueKey(ReviewSection.variations),
-          text: '最佳 R14 · 57.8%\n+3.1目 · 12,840访问',
-          semanticLabel: '最佳候选R14，胜率57.8%，领先3.1目，12840访问',
-          onTap: () =>
-              Navigator.pushNamed(context, AppRoutes.variationComparison),
-        ),
-        ReviewSection.trend => const _LargeTextInspectorCard(
-          key: ValueKey(ReviewSection.trend),
-          text: '目差走势\n黑 +2.1目 → 白 +3.1目',
-          semanticLabel: '目差走势，第87手前黑方领先2.1目，之后白方领先3.1目',
-        ),
-        ReviewSection.game => _LargeTextInspectorCard(
-          key: const ValueKey(ReviewSection.game),
-          text: '本局发挥 3级–1级\n80%区间 · 86个有效决策',
-          semanticLabel: '本局发挥3级到1级，80%区间，中等置信度，86个有效决策',
-          onTap: () => Navigator.pushNamed(context, AppRoutes.gamePerformance),
-        ),
-      };
+  Future<void> _share(
+    BuildContext buttonContext,
+    domain.VerifiedGameRecord record,
+  ) async {
+    final service = KifuExportScope.maybeOf(context);
+    if (service == null) return;
+    setState(() => _sharing = true);
+    try {
+      final outcome = await service.share(
+        record,
+        anchor: resolveShareAnchor(buttonContext),
+      );
+      if (!mounted || outcome == KifuShareOutcome.dismissed) return;
+      final message = outcome == KifuShareOutcome.success
+          ? context.l10n.shareOpened
+          : context.l10n.shareNoTarget;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+    } on KifuExportException {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(context.l10n.shareUnavailable)));
+      }
+    } finally {
+      if (mounted) setState(() => _sharing = false);
     }
-    return switch (_section) {
-      ReviewSection.keyMoves => KeyedSubtree(
-        key: const ValueKey(ReviewSection.keyMoves),
-        child: KeyMoveSummary(
-          compact: true,
-          onOpenVariation: () =>
-              Navigator.pushNamed(context, AppRoutes.variationComparison),
-        ),
-      ),
-      ReviewSection.variations => KeyedSubtree(
-        key: const ValueKey(ReviewSection.variations),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            CandidateComparison(
-              compact: true,
-              onTap: () =>
-                  Navigator.pushNamed(context, AppRoutes.variationComparison),
-            ),
-          ],
-        ),
-      ),
-      ReviewSection.trend => const KeyedSubtree(
-        key: ValueKey(ReviewSection.trend),
-        child: ReviewTrendPanel(compact: true),
-      ),
-      ReviewSection.game => KeyedSubtree(
-        key: const ValueKey(ReviewSection.game),
-        child: _ReviewDestinationCard(
-          title: '本局发挥 3级–1级',
-          detail: '80%区间 · 中等置信度 · 86个有效决策',
-          actionLabel: '查看本局指标',
-          onTap: () => Navigator.pushNamed(context, AppRoutes.gamePerformance),
-        ),
-      ),
-    };
   }
 }
 
-class _LargeTextReviewMetricStrip extends StatelessWidget {
-  const _LargeTextReviewMetricStrip({required this.currentMove});
+class _PositionMetricStrip extends StatelessWidget {
+  const _PositionMetricStrip({
+    required this.moveNumber,
+    required this.scoreLead,
+    required this.blackWinRate,
+    required this.compact,
+  });
 
-  final int currentMove;
+  final int moveNumber;
+  final double scoreLead;
+  final double blackWinRate;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final l10n = context.l10n;
+    final leader = scoreLead >= 0 ? l10n.blackStoneShort : l10n.whiteStoneShort;
+    final winRate = scoreLead >= 0 ? blackWinRate : 1 - blackWinRate;
     return Semantics(
-      label: '第$currentMove手，白方领先3.1目，白方胜率57.8%',
+      label: l10n.positionMetricSemantics(
+        moveNumber,
+        leader,
+        scoreLead.abs().toStringAsFixed(1),
+        formatPercent(winRate),
+      ),
       excludeSemantics: true,
       child: Container(
-        constraints: const BoxConstraints(
-          minHeight: GoSizes.minimumTouchTarget,
-        ),
+        constraints: const BoxConstraints(minHeight: 44),
         padding: const EdgeInsets.symmetric(horizontal: GoSpacing.s2),
         decoration: BoxDecoration(
-          color: theme.colorScheme.surface,
+          color: Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(GoRadii.card),
           border: Border.all(color: context.goColors.softDivider),
         ),
         alignment: Alignment.center,
         child: Text(
-          '第$currentMove手 · 白 +3.1目 · 57.8%',
+          compact
+              ? l10n.positionMetricCompact(
+                  moveNumber,
+                  leader,
+                  scoreLead.abs().toStringAsFixed(1),
+                  formatPercent(winRate),
+                )
+              : l10n.positionMetricFull(
+                  moveNumber,
+                  leader,
+                  scoreLead.abs().toStringAsFixed(1),
+                  formatPercent(winRate),
+                ),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: theme.textTheme.bodySmall,
+          style: Theme.of(context).textTheme.labelMedium,
         ),
       ),
     );
   }
 }
 
-class _LargeTextInspectorCard extends StatelessWidget {
-  const _LargeTextInspectorCard({
-    required this.text,
-    required this.semanticLabel,
-    super.key,
-    this.onTap,
-  });
-
-  final String text;
-  final String semanticLabel;
-  final VoidCallback? onTap;
+class _ReviewDataRequired extends StatelessWidget {
+  const _ReviewDataRequired();
 
   @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Semantics(
-      button: onTap != null,
-      label: semanticLabel,
-      excludeSemantics: true,
-      child: SurfacePanel(
-        padding: EdgeInsets.zero,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(GoRadii.card),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(
-              minHeight: GoSizes.minimumTouchTarget,
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: GoSpacing.s2,
-                vertical: GoSpacing.s1,
-              ),
-              child: Row(
-                children: <Widget>[
-                  Expanded(
-                    child: Text(
-                      text,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall,
-                    ),
-                  ),
-                  if (onTap != null)
-                    const Icon(Icons.chevron_right_rounded, size: 24),
-                ],
-              ),
-            ),
-          ),
+  Widget build(BuildContext context) => Scaffold(
+    body: Column(
+      children: <Widget>[
+        FeatureTopBar(
+          title: context.l10n.reviewTitle,
+          subtitle: context.l10n.completeAnalysisResults,
+          leading: const BackCircleButton(),
         ),
-      ),
-    );
-  }
-}
-
-class _ReviewMetricStrip extends StatelessWidget {
-  const _ReviewMetricStrip({required this.currentMove});
-
-  final int currentMove;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      constraints: const BoxConstraints(minHeight: 44),
-      padding: const EdgeInsets.symmetric(horizontal: GoSpacing.s3),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(GoRadii.card),
-        border: Border.all(color: context.goColors.softDivider),
-      ),
-      child: Row(
-        children: <Widget>[
-          _InlineMetric(
-            label: '白方领先',
-            value: '3.1目',
-            valueColor: context.goColors.dataGold,
-          ),
-          const _MetricDivider(),
-          const _InlineMetric(label: '白胜率', value: '57.8%'),
-          const _MetricDivider(),
-          _InlineMetric(label: '当前', value: '第$currentMove手'),
-        ],
-      ),
-    );
-  }
-}
-
-class _InlineMetric extends StatelessWidget {
-  const _InlineMetric({
-    required this.label,
-    required this.value,
-    this.valueColor,
-  });
-
-  final String label;
-  final String value;
-  final Color? valueColor;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Expanded(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Text(label, style: theme.textTheme.bodySmall),
-          Text(
-            value,
-            maxLines: 1,
-            style: theme.textTheme.labelLarge?.copyWith(color: valueColor),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _MetricDivider extends StatelessWidget {
-  const _MetricDivider();
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 24,
-      child: VerticalDivider(color: context.goColors.softDivider),
-    );
-  }
-}
-
-class _PhoneReviewInspector extends StatelessWidget {
-  const _PhoneReviewInspector({
-    required this.selectedSection,
-    required this.onSectionChanged,
-    required this.child,
-  });
-
-  final ReviewSection selectedSection;
-  final ValueChanged<ReviewSection> onSectionChanged;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(GoRadii.sheet),
-        border: Border.all(color: context.goColors.softDivider),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Row(
-            children: <Widget>[
-              for (final section in ReviewSection.values)
-                Expanded(
-                  child: Semantics(
-                    selected: section == selectedSection,
-                    button: true,
-                    label: '${section.label}标签页',
-                    child: InkWell(
-                      onTap: () => onSectionChanged(section),
-                      borderRadius: BorderRadius.circular(GoRadii.small),
-                      child: Container(
-                        height: GoSizes.minimumTouchTarget,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          border: Border(
-                            bottom: BorderSide(
-                              color: section == selectedSection
-                                  ? theme.colorScheme.primary
-                                  : Colors.transparent,
-                              width: 2.5,
-                            ),
-                          ),
-                        ),
-                        child: Text(
-                          section.label,
-                          style: theme.textTheme.labelLarge?.copyWith(
-                            color: section == selectedSection
-                                ? theme.colorScheme.primary
-                                : theme.colorScheme.onSurfaceVariant,
-                            fontWeight: section == selectedSection
-                                ? FontWeight.w700
-                                : FontWeight.w500,
-                          ),
-                        ),
+        Expanded(
+          child: SafeArea(
+            top: false,
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(GoSpacing.s4),
+                child: SurfacePanel(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: <Widget>[
+                      Icon(
+                        Icons.query_stats_rounded,
+                        size: 48,
+                        color: Theme.of(context).colorScheme.primary,
                       ),
-                    ),
+                      const SizedBox(height: GoSpacing.s3),
+                      Text(
+                        context.l10n.noCompletedReview,
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      const SizedBox(height: GoSpacing.s2),
+                      Text(context.l10n.verifiedGlobalAnalysisOnly),
+                      const SizedBox(height: GoSpacing.s4),
+                      FilledButton(
+                        onPressed: () => Navigator.pushNamedAndRemoveUntil(
+                          context,
+                          AppRoutes.root,
+                          (_) => false,
+                        ),
+                        child: Text(context.l10n.returnToKifu),
+                      ),
+                    ],
                   ),
                 ),
-            ],
-          ),
-          Divider(height: 1, color: context.goColors.softDivider),
-          Padding(padding: const EdgeInsets.all(GoSpacing.s2), child: child),
-        ],
-      ),
-    );
-  }
-}
-
-class _ReviewDestinationCard extends StatelessWidget {
-  const _ReviewDestinationCard({
-    required this.title,
-    required this.detail,
-    required this.actionLabel,
-    required this.onTap,
-  });
-
-  final String title;
-  final String detail;
-  final String actionLabel;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return SurfacePanel(
-      padding: EdgeInsets.zero,
-      child: Semantics(
-        button: true,
-        label: '$title，$detail，$actionLabel',
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(GoRadii.card),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: 64),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: GoSpacing.s3),
-              child: Row(
-                children: <Widget>[
-                  Expanded(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Text(title, style: theme.textTheme.titleSmall),
-                        Text(
-                          detail,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodySmall,
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: GoSpacing.s2),
-                  Text(
-                    actionLabel,
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      color: theme.colorScheme.primary,
-                    ),
-                  ),
-                  const Icon(Icons.chevron_right_rounded),
-                ],
               ),
             ),
           ),
         ),
-      ),
-    );
-  }
+      ],
+    ),
+  );
 }
 
-class _PlayerScore extends StatelessWidget {
-  const _PlayerScore({
-    required this.stoneColor,
-    required this.player,
-    required this.rank,
-    this.alignEnd = false,
-  });
+ReviewScreenData? _dataFromActiveSession(BuildContext context) {
+  final document = KifuWorkspace.maybeOf(context)?.notifier?.selected;
+  if (document is! domain.VerifiedGameRecord) return null;
+  final state = AnalysisCoordinatorScope.maybeOf(
+    context,
+  )?.sessionForDocument(document)?.state;
+  final bundle = state?.bundle;
+  final report = state?.reviewReport;
+  if (bundle == null || report == null) return null;
+  return ReviewScreenData(
+    record: document,
+    analysis: bundle,
+    report: report,
+    performanceReport: state?.performanceReport,
+  );
+}
 
-  final StoneColor stoneColor;
-  final String player;
-  final String rank;
-  final bool alignEnd;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.goColors;
-    final theme = Theme.of(context);
-    final isBlack = stoneColor == StoneColor.black;
-    return Semantics(
-      label: '${isBlack ? '黑方' : '白方'}$player，$rank',
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        textDirection: alignEnd ? TextDirection.rtl : TextDirection.ltr,
-        children: <Widget>[
-          Container(
-            width: 28,
-            height: 28,
-            decoration: BoxDecoration(
-              color: isBlack ? colors.blackStone : colors.whiteStone,
-              shape: BoxShape.circle,
-              border: Border.all(color: colors.whiteStoneOutline),
-              boxShadow: <BoxShadow>[
-                BoxShadow(color: colors.shadow, blurRadius: 3),
-              ],
-            ),
-          ),
-          const SizedBox(width: GoSpacing.s2),
-          Column(
-            crossAxisAlignment: alignEnd
-                ? CrossAxisAlignment.end
-                : CrossAxisAlignment.start,
-            children: <Widget>[
-              Text(player, style: theme.textTheme.labelMedium),
-              Text(rank, style: theme.textTheme.bodySmall),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
+BoardPoint? _previousMovePoint(ReviewScreenData data, int moveNumber) {
+  if (moveNumber <= 1) return null;
+  final point = data.record.moves[moveNumber - 2].point;
+  return point == null ? null : uiPoint(point);
 }

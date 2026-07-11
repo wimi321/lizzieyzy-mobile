@@ -1,8 +1,9 @@
 export 'analysis.dart';
 export 'contracts.dart';
-export 'fakes/fake_analysis_provider.dart';
+export 'game_replay_timeline.dart';
 export 'go_values.dart';
 export 'kifu_document.dart';
+export 'performance_calibration.dart';
 export 'rank_values.dart';
 export 'reports.dart';
 export 'rule_validator.dart';

@@ -19,6 +19,10 @@ final class AnalysisSettings {
 
   final AnalysisProfile profile;
   final int visitsPerMove;
+
+  /// Reserved for providers that implement a verified two-pass refinement.
+  /// Current production providers leave this null rather than advertising a
+  /// refinement budget they do not execute.
   final int? criticalMoveVisits;
   final int maxCandidates;
   final bool includeOwnership;
@@ -28,17 +32,23 @@ final class ModelManifest {
   ModelManifest({
     required this.id,
     required this.displayName,
-    required this.sha256,
+    required String sha256,
     required this.engineVersion,
     required this.modelVersion,
     required this.license,
     this.source,
+    String? humanModelSha256,
     List<GoRank> humanStyleRanks = const [],
-  }) : humanStyleRanks = List.unmodifiable(humanStyleRanks) {
-    if (id.trim().isEmpty || displayName.trim().isEmpty) {
-      throw ArgumentError('Model id and display name cannot be empty.');
+  }) : sha256 = sha256.toLowerCase(),
+       humanModelSha256 = humanModelSha256?.toLowerCase(),
+       humanStyleRanks = List.unmodifiable(humanStyleRanks) {
+    if (id.trim().isEmpty ||
+        displayName.trim().isEmpty ||
+        engineVersion.trim().isEmpty ||
+        modelVersion.trim().isEmpty) {
+      throw ArgumentError('Model identity and version fields cannot be empty.');
     }
-    if (!RegExp(r'^[a-fA-F0-9]{64}$').hasMatch(sha256)) {
+    if (!_sha256.hasMatch(sha256)) {
       throw const FormatException(
         'Model SHA-256 must contain 64 hexadecimal characters.',
       );
@@ -50,6 +60,20 @@ final class ModelManifest {
         'A model license is required.',
       );
     }
+    if (humanStyleRanks.toSet().length != humanStyleRanks.length) {
+      throw ArgumentError('HumanSL rank declarations must be unique.');
+    }
+    if (humanStyleRanks.isEmpty && humanModelSha256 != null) {
+      throw ArgumentError(
+        'A HumanSL model hash cannot be declared without supported ranks.',
+      );
+    }
+    if (humanStyleRanks.isNotEmpty &&
+        (humanModelSha256 == null || !_sha256.hasMatch(humanModelSha256))) {
+      throw const FormatException(
+        'HumanSL ranks require their independent model SHA-256.',
+      );
+    }
   }
 
   final String id;
@@ -59,8 +83,16 @@ final class ModelManifest {
   final String modelVersion;
   final String license;
   final Uri? source;
+
+  /// SHA-256 of the separate network passed to KataGo as `-human-model`.
+  ///
+  /// It must never be inferred from [sha256], which identifies the main
+  /// analysis network and can remain unchanged while HumanSL evidence changes.
+  final String? humanModelSha256;
   final List<GoRank> humanStyleRanks;
 }
+
+final RegExp _sha256 = RegExp(r'^[a-fA-F0-9]{64}$');
 
 final class Candidate {
   Candidate({
@@ -108,6 +140,8 @@ final class MoveAnalysis {
     required List<Candidate> candidates,
     this.playedMovePointLoss,
     this.playedMoveWinRateLoss,
+    this.playedMovePolicy,
+    this.playedMoveHumanPolicy,
     List<double> ownership = const [],
   }) : candidates = List.unmodifiable(candidates),
        ownership = List.unmodifiable(ownership) {
@@ -145,6 +179,22 @@ final class MoveAnalysis {
     if (playedMoveWinRateLoss != null) {
       _checkProbability(playedMoveWinRateLoss!, 'playedMoveWinRateLoss');
     }
+    if (moveNumber == 0 && playedMovePolicy != null) {
+      throw ArgumentError(
+        'Root analysis cannot contain a played-move policy value.',
+      );
+    }
+    if (playedMovePolicy != null) {
+      _checkProbability(playedMovePolicy!, 'playedMovePolicy');
+    }
+    if (moveNumber == 0 && playedMoveHumanPolicy != null) {
+      throw ArgumentError(
+        'Root analysis cannot contain a played-move human policy value.',
+      );
+    }
+    if (playedMoveHumanPolicy != null) {
+      _checkProbability(playedMoveHumanPolicy!, 'playedMoveHumanPolicy');
+    }
     for (final value in ownership) {
       if (!value.isFinite || value < -1 || value > 1) {
         throw RangeError.range(value, -1, 1, 'ownership');
@@ -161,6 +211,17 @@ final class MoveAnalysis {
   final List<Candidate> candidates;
   final double? playedMovePointLoss;
   final double? playedMoveWinRateLoss;
+
+  /// Full-board policy probability assigned to [playedMove] in the position
+  /// immediately before it was played.
+  ///
+  /// This is deliberately independent of [candidates], which is a bounded
+  /// display list and may omit the played move entirely.
+  final double? playedMovePolicy;
+
+  /// HumanSL policy probability assigned to [playedMove] for the calibration's
+  /// pinned rank profile. This is never substituted with the main model policy.
+  final double? playedMoveHumanPolicy;
   final List<double> ownership;
 }
 

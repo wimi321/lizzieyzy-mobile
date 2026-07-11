@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:lizzieyzy_mobile/l10n/l10n.dart';
 
 import '../tokens.dart';
 import 'metric_pill.dart';
@@ -11,8 +12,8 @@ class AnalysisProgress extends StatelessWidget {
     required this.total,
     super.key,
     this.state = AnalysisProgressState.running,
-    this.title = '标准分析',
-    this.detail = '可在后台继续',
+    this.title,
+    this.detail,
     this.onPauseResume,
     this.onCancel,
   }) : assert(completed >= 0),
@@ -22,8 +23,8 @@ class AnalysisProgress extends StatelessWidget {
   final int completed;
   final int total;
   final AnalysisProgressState state;
-  final String title;
-  final String detail;
+  final String? title;
+  final String? detail;
   final VoidCallback? onPauseResume;
   final VoidCallback? onCancel;
 
@@ -32,14 +33,19 @@ class AnalysisProgress extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final stateData = _stateData;
+    final l10n = context.l10n;
+    final resolvedTitle = title ?? l10n.analysisDefaultTitle;
+    final resolvedDetail = detail ?? l10n.analysisContinuesInApp;
+    final stateData = _stateData(l10n);
     final isPaused = state == AnalysisProgressState.paused;
     final canControl = state == AnalysisProgressState.running || isPaused;
     return Semantics(
       container: true,
       liveRegion: true,
       label:
-          '$title，${stateData.label}，$completed / $total${total == 0 ? '' : '，${(_progress! * 100).round()}%'}，$detail',
+          '$resolvedTitle, ${stateData.label}, $completed / $total'
+          '${total == 0 ? '' : ', ${(_progress! * 100).round()}%'}, '
+          '$resolvedDetail',
       child: Card(
         child: Padding(
           padding: const EdgeInsets.all(GoSpacing.s4),
@@ -54,9 +60,9 @@ class AnalysisProgress extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
-                        Text(title, style: theme.textTheme.titleMedium),
+                        Text(resolvedTitle, style: theme.textTheme.titleMedium),
                         const SizedBox(height: GoSpacing.s1),
-                        Text(detail, style: theme.textTheme.bodySmall),
+                        Text(resolvedDetail, style: theme.textTheme.bodySmall),
                       ],
                     ),
                   ),
@@ -73,7 +79,7 @@ class AnalysisProgress extends StatelessWidget {
               LinearProgressIndicator(
                 value: state == AnalysisProgressState.completed ? 1 : _progress,
                 minHeight: 7,
-                semanticsLabel: '分析进度',
+                semanticsLabel: l10n.analysisProgressLabel,
                 // Progress semantics require a numeric value between 0 and
                 // 100. The enclosing live region carries the exact count.
                 semanticsValue: total == 0
@@ -92,12 +98,14 @@ class AnalysisProgress extends StatelessWidget {
                             ? Icons.play_arrow_rounded
                             : Icons.pause_rounded,
                       ),
-                      label: Text(isPaused ? '继续' : '暂停'),
+                      label: Text(
+                        isPaused ? l10n.resumeAction : l10n.pauseAction,
+                      ),
                     ),
                     TextButton.icon(
                       onPressed: onCancel,
                       icon: const Icon(Icons.close_rounded),
-                      label: const Text('取消'),
+                      label: Text(l10n.cancelAction),
                     ),
                   ];
                   final count = Text(
@@ -144,24 +152,24 @@ class AnalysisProgress extends StatelessWidget {
     );
   }
 
-  _AnalysisStateData get _stateData => switch (state) {
-    AnalysisProgressState.running => const _AnalysisStateData(
-      label: '分析中',
+  _AnalysisStateData _stateData(AppLocalizations l10n) => switch (state) {
+    AnalysisProgressState.running => _AnalysisStateData(
+      label: l10n.analysisRunning,
       tone: MetricTone.primary,
       icon: Icons.pending_rounded,
     ),
-    AnalysisProgressState.paused => const _AnalysisStateData(
-      label: '已暂停',
+    AnalysisProgressState.paused => _AnalysisStateData(
+      label: l10n.analysisPaused,
       tone: MetricTone.gold,
       icon: Icons.pause_circle_outline_rounded,
     ),
-    AnalysisProgressState.completed => const _AnalysisStateData(
-      label: '已完成',
+    AnalysisProgressState.completed => _AnalysisStateData(
+      label: l10n.analysisCompleted,
       tone: MetricTone.positive,
       icon: Icons.check_circle_outline_rounded,
     ),
-    AnalysisProgressState.error => const _AnalysisStateData(
-      label: '分析失败',
+    AnalysisProgressState.error => _AnalysisStateData(
+      label: l10n.analysisFailed,
       tone: MetricTone.negative,
       icon: Icons.error_outline_rounded,
     ),

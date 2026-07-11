@@ -3,6 +3,8 @@ import 'package:lizzieyzy_mobile/application/kifu_workspace.dart';
 import 'package:lizzieyzy_mobile/design_system/design_system.dart'
     hide StoneColor;
 import 'package:lizzieyzy_mobile/domain/domain.dart';
+import 'package:lizzieyzy_mobile/infrastructure/kifu/kifu.dart';
+import 'package:lizzieyzy_mobile/l10n/l10n.dart';
 
 import '../../common/presentation/feature_chrome.dart';
 import 'kifu_import_controller.dart';
@@ -41,14 +43,15 @@ class _KifuImportScreenState extends State<KifuImportScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return Scaffold(
       body: SafeArea(
         child: Column(
           children: <Widget>[
-            const FeatureTopBar(
-              title: '导入棋谱',
-              subtitle: 'SGF / GIB · 本地校验',
-              leading: BackCircleButton(),
+            FeatureTopBar(
+              title: l10n.importKifuTitle,
+              subtitle: l10n.importKifuSubtitle,
+              leading: const BackCircleButton(),
             ),
             Expanded(
               child: Padding(
@@ -71,20 +74,41 @@ class _KifuImportScreenState extends State<KifuImportScreen> {
     KifuImportStatus.idle => _ImportIdle(onPick: _controller.pickAndImport),
     KifuImportStatus.picking => const _ImportProgress(),
     KifuImportStatus.failed => _ImportFailure(
-      message: _controller.errorMessage ?? '无法读取棋谱。',
+      message: _failureMessage(context, _controller.failureCode),
       onRetry: _controller.pickAndImport,
     ),
     KifuImportStatus.imported => _ImportSuccess(
       imported: _controller.result!,
       saved: _savedDocument == _controller.result!.document,
-      onSave: () {
+      onSave: () async {
         final document = _controller.result!.document;
-        KifuWorkspace.of(context).add(document);
-        setState(() => _savedDocument = document);
+        try {
+          await KifuWorkspace.of(context).addPersisted(document);
+          if (mounted) setState(() => _savedDocument = document);
+        } on Object {
+          if (!context.mounted) return;
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(context.l10n.saveKifuFailed)));
+        }
       },
       onPickAgain: _controller.pickAndImport,
     ),
   };
+
+  String _failureMessage(BuildContext context, KifuImportFailureCode? code) =>
+      switch (code) {
+        KifuImportFailureCode.resourceLimit =>
+          context.l10n.importErrorResourceLimit,
+        KifuImportFailureCode.invalidEncoding =>
+          context.l10n.importErrorInvalidEncoding,
+        KifuImportFailureCode.unsupportedFormat =>
+          context.l10n.importErrorUnsupportedFormat,
+        KifuImportFailureCode.invalidRecord =>
+          context.l10n.importErrorInvalidRecord,
+        KifuImportFailureCode.unknown => context.l10n.importErrorUnknown,
+        null => context.l10n.kifuReadFailed,
+      };
 }
 
 class _ImportIdle extends StatelessWidget {
@@ -111,10 +135,10 @@ class _ImportIdle extends StatelessWidget {
           ),
         ),
         const SizedBox(height: GoSpacing.s5),
-        Text('选择 SGF 或 GIB 棋谱', style: theme.textTheme.titleLarge),
+        Text(context.l10n.chooseKifuTitle, style: theme.textTheme.titleLarge),
         const SizedBox(height: GoSpacing.s2),
         Text(
-          '导入后先进行格式与围棋规则校验；有缺口的记录会明确降级，不会伪装成完整棋谱。',
+          context.l10n.chooseKifuBody,
           textAlign: TextAlign.center,
           style: theme.textTheme.bodyMedium,
         ),
@@ -124,7 +148,7 @@ class _ImportIdle extends StatelessWidget {
           child: FilledButton.icon(
             onPressed: onPick,
             icon: const Icon(Icons.folder_open_outlined),
-            label: const Text('选择棋谱文件'),
+            label: Text(context.l10n.chooseKifuFile),
           ),
         ),
       ],
@@ -136,13 +160,13 @@ class _ImportProgress extends StatelessWidget {
   const _ImportProgress();
 
   @override
-  Widget build(BuildContext context) => const Center(
+  Widget build(BuildContext context) => Center(
     child: Column(
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
-        CircularProgressIndicator(),
-        SizedBox(height: GoSpacing.s4),
-        Text('正在校验棋谱…'),
+        const CircularProgressIndicator(),
+        const SizedBox(height: GoSpacing.s4),
+        Text(context.l10n.validatingKifu),
       ],
     ),
   );
@@ -165,11 +189,11 @@ class _ImportFailure extends StatelessWidget {
           color: theme.colorScheme.error,
         ),
         const SizedBox(height: GoSpacing.s4),
-        Text('导入失败', style: theme.textTheme.titleLarge),
+        Text(context.l10n.importFailed, style: theme.textTheme.titleLarge),
         const SizedBox(height: GoSpacing.s2),
         Text(message, textAlign: TextAlign.center),
         const SizedBox(height: GoSpacing.s5),
-        FilledButton(onPressed: onRetry, child: const Text('重新选择')),
+        FilledButton(onPressed: onRetry, child: Text(context.l10n.chooseAgain)),
       ],
     );
   }
@@ -185,19 +209,29 @@ class _ImportSuccess extends StatelessWidget {
 
   final ImportedKifu imported;
   final bool saved;
-  final VoidCallback onSave;
+  final Future<void> Function() onSave;
   final VoidCallback onPickAgain;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = context.l10n;
     final document = imported.document;
     final (typeLabel, detail) = switch (document) {
-      VerifiedGameRecord(:final moves) => ('完整棋谱', '${moves.length}手 · 规则校验通过'),
-      PartialGameRecord(:final moves) => ('片段棋谱', '${moves.length}手 · 需要人工确认'),
+      VerifiedGameRecord(:final moves) => (
+        l10n.completeKifu,
+        l10n.verifiedRecordDetail(l10n.moveCount(moves.length)),
+      ),
+      PartialGameRecord(:final moves) => (
+        l10n.partialKifu,
+        l10n.partialRecordDetail(l10n.moveCount(moves.length)),
+      ),
       PositionSnapshot(:final position) => (
-        '当前局面',
-        '黑${position.count(StoneColor.black)}子 · 白${position.count(StoneColor.white)}子',
+        l10n.statusCurrentPosition,
+        l10n.stoneCounts(
+          position.count(StoneColor.black),
+          position.count(StoneColor.white),
+        ),
       ),
     };
     return Column(
@@ -231,11 +265,25 @@ class _ImportSuccess extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.labelMedium,
                 ),
-                if (imported.warnings.isNotEmpty) ...<Widget>[
+                const SizedBox(height: GoSpacing.s3),
+                MetricPill(
+                  label: l10n.fileEncoding,
+                  value: imported.textEncoding.label,
+                  tone: imported.textEncoding == KifuTextEncoding.utf8
+                      ? MetricTone.neutral
+                      : MetricTone.gold,
+                ),
+                if (imported.warnings.isNotEmpty ||
+                    imported.textEncoding != KifuTextEncoding.utf8) ...<Widget>[
                   const SizedBox(height: GoSpacing.s3),
                   MetricPill(
-                    label: '警告',
-                    value: '${imported.warnings.length}项',
+                    label: l10n.warning,
+                    value: l10n.warningCount(
+                      imported.warnings.length +
+                          (imported.textEncoding == KifuTextEncoding.utf8
+                              ? 0
+                              : 1),
+                    ),
                     tone: MetricTone.gold,
                   ),
                 ],
@@ -247,10 +295,10 @@ class _ImportSuccess extends StatelessWidget {
         FilledButton.icon(
           onPressed: saved ? null : onSave,
           icon: Icon(saved ? Icons.check_rounded : Icons.save_outlined),
-          label: Text(saved ? '已加入棋谱' : '加入棋谱'),
+          label: Text(saved ? l10n.addedToKifu : l10n.addToKifu),
         ),
         const SizedBox(height: GoSpacing.s2),
-        TextButton(onPressed: onPickAgain, child: const Text('导入另一份')),
+        TextButton(onPressed: onPickAgain, child: Text(l10n.importAnother)),
       ],
     );
   }

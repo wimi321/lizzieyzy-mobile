@@ -1,18 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:lizzieyzy_mobile/l10n/l10n.dart';
 
 import '../tokens.dart';
 import 'metric_pill.dart';
 
 enum CorrectionChoice { black, white, empty, unknown }
-
-extension CorrectionChoiceLabel on CorrectionChoice {
-  String get label => switch (this) {
-    CorrectionChoice.black => '黑',
-    CorrectionChoice.white => '白',
-    CorrectionChoice.empty => '空',
-    CorrectionChoice.unknown => '看不清',
-  };
-}
 
 class CorrectionTray extends StatelessWidget {
   const CorrectionTray({
@@ -20,19 +12,20 @@ class CorrectionTray extends StatelessWidget {
     required this.onSelected,
     super.key,
     this.selected,
-    this.title = '校对棋盘',
+    this.title,
     this.coordinate,
   }) : assert(pendingCount >= 0);
 
   final int pendingCount;
   final CorrectionChoice? selected;
   final ValueChanged<CorrectionChoice>? onSelected;
-  final String title;
+  final String? title;
   final String? coordinate;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = context.l10n;
     return Material(
       color: theme.colorScheme.surface,
       shape: RoundedRectangleBorder(
@@ -62,11 +55,14 @@ class CorrectionTray extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
-                        Text(title, style: theme.textTheme.titleMedium),
+                        Text(
+                          title ?? l10n.correctBoardTitle,
+                          style: theme.textTheme.titleMedium,
+                        ),
                         if (coordinate != null) ...<Widget>[
                           const SizedBox(height: GoSpacing.s1),
                           Text(
-                            '交叉点 $coordinate',
+                            l10n.intersectionCoordinate(coordinate!),
                             style: theme.textTheme.bodySmall,
                           ),
                         ],
@@ -74,7 +70,9 @@ class CorrectionTray extends StatelessWidget {
                     ),
                   ),
                   MetricPill(
-                    label: pendingCount == 0 ? '已确认' : '待确认 $pendingCount',
+                    label: pendingCount == 0
+                        ? l10n.confirmed
+                        : l10n.pendingConfirmation(pendingCount),
                     tone: pendingCount == 0
                         ? MetricTone.positive
                         : MetricTone.gold,
@@ -122,6 +120,8 @@ class _CorrectionButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final l10n = context.l10n;
+    final label = _choiceLabel(l10n, choice);
     final button = OutlinedButton.icon(
       onPressed: onPressed,
       style: OutlinedButton.styleFrom(
@@ -136,18 +136,26 @@ class _CorrectionButton extends StatelessWidget {
         ),
       ),
       icon: _CorrectionIcon(choice: choice),
-      label: Text(choice.label),
+      label: Text(label),
     );
     return Semantics(
       button: true,
       enabled: onPressed != null,
       selected: selected,
-      label: '${choice.label}棋子',
+      label: l10n.stoneChoiceSemantics(label),
       excludeSemantics: true,
       child: button,
     );
   }
 }
+
+String _choiceLabel(AppLocalizations l10n, CorrectionChoice choice) =>
+    switch (choice) {
+      CorrectionChoice.black => l10n.blackStoneShort,
+      CorrectionChoice.white => l10n.whiteStoneShort,
+      CorrectionChoice.empty => l10n.emptyPoint,
+      CorrectionChoice.unknown => l10n.unclearPoint,
+    };
 
 class _CorrectionIcon extends StatelessWidget {
   const _CorrectionIcon({required this.choice});

@@ -153,7 +153,10 @@ void main() {
       ),
     );
 
-    expect(find.bySemanticsLabel(RegExp('目差走势.*黑方领先')), findsOneWidget);
+    expect(
+      find.bySemanticsLabel(RegExp('目差走势.*白方领先 5\\.2 目.*当前第 87 手')),
+      findsOneWidget,
+    );
     expect(find.bySemanticsLabel(RegExp('本局发挥估计.*3级.*1级')), findsOneWidget);
     semantics.dispose();
   });

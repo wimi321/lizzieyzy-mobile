@@ -1,0 +1,3 @@
+"NSCameraUsageDescription" = "바둑판을 촬영하고 현재 국면 또는 수순이 표시된 기보 이미지를 기기에서 인식하는 데 사용합니다.";
+"NSPhotoLibraryUsageDescription" = "바둑판 사진 또는 수순이 표시된 기보 이미지를 선택하여 기기에서 인식하는 데 사용합니다.";
+"NSLocalNetworkUsageDescription" = "사용자가 설정한 로컬 네트워크의 KataGo 분석 서비스에 연결하는 데 사용합니다.";

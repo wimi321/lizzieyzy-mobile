@@ -8,6 +8,7 @@ import hashlib
 import json
 import re
 import sys
+import textwrap
 import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
@@ -65,10 +66,26 @@ def write_or_check(output: Path, content: str, check: bool) -> None:
     if check:
         if not output.is_file():
             fail(f"missing generated legal asset: {output.relative_to(ROOT)}")
-        if output.read_text("utf-8") != content:
+        reviewed = output.read_text("utf-8")
+        if reviewed != content:
+            reviewed_lines = reviewed.splitlines()
+            generated_lines = content.splitlines()
+            difference = "different trailing newline or text encoding"
+            for index in range(max(len(reviewed_lines), len(generated_lines))):
+                reviewed_line = reviewed_lines[index] if index < len(reviewed_lines) else ""
+                generated_line = (
+                    generated_lines[index] if index < len(generated_lines) else ""
+                )
+                if reviewed_line != generated_line:
+                    difference = (
+                        f"first difference at line {index + 1}: "
+                        f"reviewed={reviewed_line[:120]!r}, "
+                        f"generated={generated_line[:120]!r}"
+                    )
+                    break
             fail(
                 f"generated legal asset is stale: {output.relative_to(ROOT)}; "
-                "regenerate it from the locked native graph"
+                f"regenerate it from the locked native graph; {difference}"
             )
         return
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -109,8 +126,13 @@ def canonical_pod_acknowledgements(content: str) -> tuple[str, set[str]]:
             if not body_lines or body_lines[-1].strip() != POD_ACKNOWLEDGEMENTS_FOOTER:
                 fail("CocoaPods acknowledgements footer is missing")
             body_lines.pop()
-        body = "\n".join(line.rstrip() for line in body_lines).strip()
-        body = re.sub(r"\n{3,}", "\n\n", body)
+        body = " ".join("\n".join(body_lines).split())
+        body = textwrap.fill(
+            body,
+            width=100,
+            break_long_words=False,
+            break_on_hyphens=False,
+        )
         sections[name] = body
 
     rendered = [POD_ACKNOWLEDGEMENTS_HEADER, POD_ACKNOWLEDGEMENTS_INTRO]
